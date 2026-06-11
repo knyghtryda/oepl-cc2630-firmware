@@ -457,7 +457,7 @@ int main(void)
     if (ioc_frozen) {
         AONIOCFreezeDisable();
         SysCtrlAonUpdate();
-        SysCtrlAdjustRechargeAfterPowerDown(0);
+        SysCtrlAdjustRechargeAfterPowerDown();
     }
 
     // --- Power up PERIPH domain (for GPIO) ---

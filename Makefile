@@ -46,8 +46,9 @@ INCLUDES = \
 	-I$(DRIVERS_DIR) \
 	-I$(CONFIG_DIR) \
 	-I$(FIRMWARE_DIR)/shared \
+	-I$(CC26X0_DIR) \
 	-I$(CC26X0_INC) \
-	-I$(CC26X0_DRIVERLIB)
+	-I$(CC26X0_DRIVERLIB) 
 
 # Defines
 DEFINES = \
@@ -122,7 +123,7 @@ $(BIN_DIR):
 $(BUILD_DIR)/%.o: %.c | $(BUILD_DIR)
 	@echo "CC $<"
 	@mkdir -p $(dir $@)
-	@$(CC) $(CFLAGS) -c $< -o $@
+	$(CC) $(CFLAGS) -c $< -o $@
 
 # Compile C++ files
 $(BUILD_DIR)/%.o: %.cpp | $(BUILD_DIR)
