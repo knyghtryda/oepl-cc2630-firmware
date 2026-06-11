@@ -123,7 +123,7 @@ $(BIN_DIR):
 $(BUILD_DIR)/%.o: %.c | $(BUILD_DIR)
 	@echo "CC $<"
 	@mkdir -p $(dir $@)
-	$(CC) $(CFLAGS) -c $< -o $@
+	@$(CC) $(CFLAGS) -c $< -o $@
 
 # Compile C++ files
 $(BUILD_DIR)/%.o: %.cpp | $(BUILD_DIR)
