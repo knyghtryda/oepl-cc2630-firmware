@@ -1,0 +1,11 @@
+si SWD
+speed 4000
+device CC2630F128
+connect
+r
+h
+loadbin binaries/Tag_FW_CC2630_TG-GR6000N.bin, 0x00000000
+verifybin binaries/Tag_FW_CC2630_TG-GR6000N.bin, 0x00000000
+r
+g
+exit
