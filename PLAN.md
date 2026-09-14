@@ -72,7 +72,14 @@ Findings on the bench (Weather6, `00124B0018177B31`, RSSI −67, AP 192.168.5.4)
       (it does that — the "DB snapshot reverted" events yesterday were the same).
 - [x] DIAG builds report version with bit 15 set (32783) so a debug build can't be mistaken
       for production at the AP.
-- [ ] Commit, update README
+- [x] Commit, update README (pushed 2026-09-14)
+
+## Weather display (2026-09-14)
+
+- [x] Redesigned the HA `drawcustom` layout for Weather6 (`tools/weather_display.py`):
+      header with current conditions + details, 8-column 16 h hourly strip, 5-day columns,
+      in-bounds footer. Installed as `weather_forecast_oepl_display`, refresh every 2 h at :05.
+- [ ] Battery life on a fresh set with 12 refreshes/day — watch `batteryMv` in the AP DB.
 
 ## Follow-ups (not blocking)
 

@@ -19,3 +19,6 @@ Thumbs.db
 
 # Python
 __pycache__/
+
+# Fonts fetched by tools/weather_display.py
+tools/weather_assets/

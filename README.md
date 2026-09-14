@@ -52,6 +52,7 @@ oepl-cc2630-firmware/
 └── tools/                Utility scripts
     ├── ap.py             AP helper: OTA push, image push, poll tag state, decode fault/diag reports
     ├── ap_log.py         Stream the AP's live log (block requests, xfer complete, timeouts)
+    ├── weather_display.py  Home Assistant weather layout: preview, push, install automation
     ├── flash.sh          UART bootloader flash script
     ├── dl_pin.sh         D/L pin (GPIO17) control
     └── start_fw.jlink    JLink firmware launch script
