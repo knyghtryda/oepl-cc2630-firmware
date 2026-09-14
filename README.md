@@ -28,7 +28,7 @@ Custom open-source OEPL firmware for the Solum TG-GR6000N 6.0" BWR e-paper tag.
 - [x] SEGGER RTT debug output (512-byte buffer)
 - [x] UART TX debug output on DIO3 at 115200 baud
 
-**Firmware**: v0.15 — ~18KB flash, 13KB static RAM (see `PLAN.md` for history, `DEVELOPMENT.md` for the test loop)
+**Firmware**: v0.16 — ~18KB flash, 13KB static RAM (see `PLAN.md` for history, `DEVELOPMENT.md` for the test loop)
 
 ## Project Structure
 

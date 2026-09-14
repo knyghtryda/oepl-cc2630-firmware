@@ -569,9 +569,14 @@ int main(void)
     print_mac_msb(mac);
     rtt_puts("\r\n");
 
-    // --- Initialize display ---
-    uc8159_init();
-    rtt_puts("Display init OK\r\n");
+    // --- Display pins only ---
+    // Configure the panel's control lines (RST high keeps it in the deep
+    // sleep it was left in) but do NOT run uc8159_init(): that sequence ends
+    // with the panel powered on, and on a warm boot nothing would power it
+    // off again before the next standby, so the booster would idle at ~mA for
+    // the whole sleep interval. Both draw paths call uc8159_wake() themselves.
+    oepl_hw_gpio_init();
+    oepl_hw_spi_init();
 
     // --- Initialize RF core ---
     rf_status_t rc = oepl_rf_init();

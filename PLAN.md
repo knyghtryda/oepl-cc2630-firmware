@@ -79,7 +79,13 @@ Findings on the bench (Weather6, `00124B0018177B31`, RSSI −67, AP 192.168.5.4)
 - [x] Redesigned the HA `drawcustom` layout for Weather6 (`tools/weather_display.py`):
       header with current conditions + details, 8-column 16 h hourly strip, 5-day columns,
       in-bounds footer. Installed as `weather_forecast_oepl_display`, refresh every 2 h at :05.
+- [x] v0.16: no panel power-on at boot (was left powered through every sleep); AP `maxsleep=30`,
+      `stopsleep=0`; automation `ttl: 7200` → Weather6 checks in every 30 min instead of every minute.
 - [ ] Battery life on a fresh set with 12 refreshes/day — watch `batteryMv` in the AP DB.
+      First-principles estimate if standby is real: ~9 mAh/day → 5–8 months (see DEVELOPMENT.md).
+- [ ] Measure sleep current on the bench (DMM mA range in series is enough to tell 12 µA from
+      300 µA from 2 mA). If it's not ~10–20 µA: finish TI's SysCtrlStandby sequence (RFC/SERIAL/
+      CPU/VIMS off, uLDO, cache retention off) and put the SPI flash in deep power-down.
 
 ## Follow-ups (not blocking)
 

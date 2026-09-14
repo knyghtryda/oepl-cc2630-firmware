@@ -163,6 +163,23 @@ preview is pixel-identical to what HA sends. Edit `build_payload()`, preview,
 push to the tag to judge it on the panel, then `install`. Needs
 `~/secrets.toml` with `[homeassistant] bearer_token_local`.
 
+## Power budget (estimate, unmeasured)
+
+4×CR2450 in parallel ≈ 2000 mAh usable. Per day at 30-min check-ins and 12
+image updates: standby ~0.3 mAh (assumes ~12 µA: MCU standby + panel deep
+sleep + SPI flash *not* in power-down), check-ins ~0.1 mAh, updates ~6 mAh
+(download ~100 s at ~9 mA, refresh ~26 s at ~20 mA) → ~7 mAh/day → 6–9
+months, less coin-cell pulse derating. Things that would wreck it: the panel
+left powered (fixed in v0.16 — `uc8159_init` ends in PON and used to run at
+every boot), and sleep not reaching true standby (`enter_sleep` only powers
+off PERIPH; a WFI-return path was observed in v0.5 testing, i.e. the MCU
+domain stayed up). Measure before optimising further.
+
+Check-in cadence is the AP's: `min(minutes until the content's TTL, maxsleep)`,
+sent only if > 1 min and only when `stopsleep=0` or no web UI is connected.
+HA `drawcustom` defaults `ttl` to 60 s → 1-minute check-ins. The AP is set to
+`maxsleep=30`, `stopsleep=0`; the weather automation sends `ttl: 7200`.
+
 ### Long-running
 
 `tools/monitor_48h.sh` polls the AP for a soak test.

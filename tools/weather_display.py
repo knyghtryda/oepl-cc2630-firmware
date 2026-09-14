@@ -166,7 +166,9 @@ def build_automation():
             {"action": "weather.get_forecasts", "target": {"entity_id": WEATHER},
              "data": {"type": "daily"}, "response_variable": "daily"},
             {"action": "open_epaper_link.drawcustom", "target": {"device_id": DEVICE_ID},
-             "data": {"background": "white", "rotate": 0, "dither": 0, "payload": build_payload()}},
+             # ttl: how long the tag may sleep between check-ins after this image
+             # (seconds; the AP caps it at its maxsleep setting, the tag at 1 h)
+             "data": {"background": "white", "rotate": 0, "dither": 0, "ttl": 7200, "payload": build_payload()}},
         ],
         "mode": "single",
     }
