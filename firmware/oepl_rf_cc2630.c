@@ -5,7 +5,9 @@
 // -----------------------------------------------------------------------------
 
 #include "oepl_rf_cc2630.h"
+#include "oepl_hw_abstraction_cc2630.h"
 #include "rtt.h"
+#include "fault.h"
 
 #include <string.h>
 
@@ -18,6 +20,7 @@
 #include "rf_mailbox.h"
 #include "hw_rfc_pwr.h"
 #include "hw_rfc_dbell.h"
+#include "hw_rfc_rat.h"
 #include "hw_memmap.h"
 #include "osc.h"
 
@@ -53,11 +56,39 @@ static rfc_CMD_IEEE_TX_t rf_cmd_tx;
 static rfc_CMD_IEEE_RX_t rf_cmd_rx;
 static rfc_ieeeRxOutput_t rf_rx_output;
 
-// RX data queue: single entry, circular
-#define RX_BUF_SIZE 256
-static uint8_t rx_buf[RX_BUF_SIZE] __attribute__((aligned(4)));
-static rfc_dataEntryGeneral_t *rx_entry = (rfc_dataEntryGeneral_t *)rx_buf;
+// RX data queue: ring of RX_NUM_ENTRIES general entries.
+//
+// A block transfer is a burst of 42 BlockParts ~4ms apart. With a single
+// entry, every frame that lands between the radio marking the entry FINISHED
+// and firmware calling oepl_rf_rx_flush() is silently dropped — which made
+// image downloads fail while 2-packet checkins worked fine. The ring only has
+// to absorb that release latency; 8 entries is ~30ms of slack.
+//
+// The radio fills entries in ring order; rx_rd is the entry firmware will
+// read next. Every oepl_rf_rx_flush() releases that entry and advances.
+#define RX_BUF_SIZE     256
+#define RX_NUM_ENTRIES  8
+static uint8_t rx_buf[RX_NUM_ENTRIES][RX_BUF_SIZE] __attribute__((aligned(4)));
+static rfc_dataEntryGeneral_t *rx_entries[RX_NUM_ENTRIES];
+static uint8_t rx_rd;
 static dataQueue_t rx_queue;
+
+// Reset every ring entry to PENDING and point both the radio and the read
+// cursor at entry 0.
+static void rx_queue_reset(void)
+{
+    for (uint8_t i = 0; i < RX_NUM_ENTRIES; i++) {
+        rx_entries[i] = (rfc_dataEntryGeneral_t *)rx_buf[i];
+        rx_entries[i]->pNextEntry  = rx_buf[(i + 1) % RX_NUM_ENTRIES];
+        rx_entries[i]->status      = DATA_ENTRY_PENDING;
+        rx_entries[i]->config.type = DATA_ENTRY_TYPE_GEN;
+        rx_entries[i]->config.lenSz = 1;
+        rx_entries[i]->length = RX_BUF_SIZE - sizeof(rfc_dataEntryGeneral_t) + 1;
+    }
+    rx_rd = 0;
+    rx_queue.pCurrEntry = rx_buf[0];
+    rx_queue.pLastEntry = NULL;  // NULL = circular queue
+}
 
 // TX buffer
 static uint8_t tx_buf[128];
@@ -85,9 +116,44 @@ static void rf_wait_boot(void)
     }
 }
 
+// Bounded replacement for driverlib rf_doorbell(), whose two while()
+// loops never return if the RF core's CM0 stops responding. A dead radio
+// would otherwise hang the tag silently; instead record a pseudo-fault and
+// reset, which main() reports to the AP as WAKEUP_REASON_WDT_RESET.
+#define RF_DOORBELL_TIMEOUT_LOOPS 2000000  // ~100ms+ at 48MHz, far above normal
+
+static uint32_t rf_doorbell(uint32_t pOp)
+{
+    volatile uint32_t i;
+    for (i = 0; i < RF_DOORBELL_TIMEOUT_LOOPS; i++)
+        if (HWREG(RFC_DBELL_BASE + RFC_DBELL_O_CMDR) == 0) break;
+    if (i < RF_DOORBELL_TIMEOUT_LOOPS) {
+        RFCAckIntClear();
+        HWREG(RFC_DBELL_BASE + RFC_DBELL_O_CMDR) = pOp;
+        for (i = 0; i < RF_DOORBELL_TIMEOUT_LOOPS; i++)
+            if (HWREG(RFC_DBELL_BASE + RFC_DBELL_O_RFACKIFG)) break;
+        if (i < RF_DOORBELL_TIMEOUT_LOOPS) {
+            RFCAckIntClear();
+            return HWREG(RFC_DBELL_BASE + RFC_DBELL_O_CMDSTA);
+        }
+    }
+
+    rtt_puts("RF: doorbell hung, RESET\r\n");
+    g_fault.pc   = FAULT_PC_RF_DOORBELL;
+    g_fault.lr   = pOp;
+    g_fault.sp   = 0;
+    g_fault.cfsr = HWREG(RFC_DBELL_BASE + RFC_DBELL_O_CMDSTA);
+    g_fault.bfar = HWREG(RFC_DBELL_BASE + RFC_DBELL_O_RFCPEIFG);
+    g_fault.magic = FAULT_MAGIC;
+    for (i = 0; i < 5000000; i++) __asm volatile("nop");  // let RTT drain
+    typedef void (*reset_fn_t)(void);
+    ((reset_fn_t)((uint32_t *)0x10000048)[6])();          // ROM HAPI ResetDevice
+    while (1) __asm volatile("nop");
+}
+
 static rf_status_t rf_send_cmd(uint32_t cmd_ptr)
 {
-    uint32_t cmdsta = RFCDoorbellSendTo(cmd_ptr);
+    uint32_t cmdsta = rf_doorbell(cmd_ptr);
     if ((cmdsta & 0xFF) != CMDSTA_Done) {
         rtt_puts("RF cmd rejected: CMDSTA=0x");
         rtt_put_hex8(cmdsta & 0xFF);
@@ -105,6 +171,7 @@ static rf_status_t rf_wait_cmd_done(volatile uint16_t *status_ptr, uint32_t time
     //   10 = error
     // Use masked comparison so both generic and IEEE-specific statuses work.
     for (volatile uint32_t i = 0; i < timeout_loops; i++) {
+        oepl_hw_wdt_kick();
         uint16_t s = *status_ptr;
         if ((s & 0x0C00) == 0x0400) {
             // Done normally (includes DONE_OK, IEEE_DONE_OK, IEEE_DONE_ACK, etc.)
@@ -188,7 +255,7 @@ rf_status_t oepl_rf_init(void)
     }
 
     // 8. Verify RF core is alive
-    uint32_t cmdsta = RFCDoorbellSendTo(CMDR_DIR_CMD(CMD_PING));
+    uint32_t cmdsta = rf_doorbell(CMDR_DIR_CMD(CMD_PING));
     if ((cmdsta & 0xFF) != CMDSTA_Done) {
         rtt_puts("RF: PING FAIL\r\n");
         return RF_ERR_BOOT;
@@ -196,7 +263,7 @@ rf_status_t oepl_rf_init(void)
 
     // 9. Start Radio Timer (RAT) — direct command, needed for FG scheduling
     rtt_puts("RF: RAT...");
-    cmdsta = RFCDoorbellSendTo(CMDR_DIR_CMD(CMD_START_RAT));
+    cmdsta = rf_doorbell(CMDR_DIR_CMD(CMD_START_RAT));
     rtt_puts("sta=0x");
     rtt_put_hex8(cmdsta & 0xFF);
     rtt_puts("\r\n");
@@ -234,16 +301,9 @@ rf_status_t oepl_rf_init(void)
     }
     rtt_puts("OK\r\n");
 
-    // 12. Set up RX data queue (single entry, circular)
+    // 12. Set up RX data queue (ring of entries, circular)
     memset(rx_buf, 0, sizeof(rx_buf));
-    rx_entry->pNextEntry = (uint8_t *)rx_entry;
-    rx_entry->status = DATA_ENTRY_PENDING;
-    rx_entry->config.type = DATA_ENTRY_TYPE_GEN;
-    rx_entry->config.lenSz = 1;
-    rx_entry->length = RX_BUF_SIZE - sizeof(rfc_dataEntryGeneral_t) + 1;
-
-    rx_queue.pCurrEntry = (uint8_t *)rx_entry;
-    rx_queue.pLastEntry = NULL;
+    rx_queue_reset();
 
     // Read local extended address from FCFG1 for RX frame filtering
     local_ext_addr = (uint64_t)FCFG1_MAC_15_4_0 | ((uint64_t)FCFG1_MAC_15_4_1 << 32);
@@ -320,7 +380,7 @@ rf_status_t oepl_rf_tx(const uint8_t *payload, uint8_t len)
     rf_cmd_tx.payloadLen = len;
     rf_cmd_tx.pPayload = tx_buf;
 
-    uint32_t cmdsta = RFCDoorbellSendTo((uint32_t)&rf_cmd_tx);
+    uint32_t cmdsta = rf_doorbell((uint32_t)&rf_cmd_tx);
 
     if ((cmdsta & 0xFF) != CMDSTA_Done) {
         rtt_puts("RF: TX rejected sta=0x");
@@ -359,9 +419,8 @@ rf_status_t oepl_rf_tx(const uint8_t *payload, uint8_t len)
 
 rf_status_t oepl_rf_rx_start(uint8_t ieee_channel, uint32_t timeout_us)
 {
-    // Reset RX entry
-    rx_entry->status = DATA_ENTRY_PENDING;
-    rx_queue.pCurrEntry = (uint8_t *)rx_entry;
+    // Reset RX ring so radio and firmware start the session on the same entry
+    rx_queue_reset();
 
     memset(&rf_rx_output, 0, sizeof(rf_rx_output));
 
@@ -436,6 +495,22 @@ rf_status_t oepl_rf_rx_start(uint8_t ieee_channel, uint32_t timeout_us)
     return RF_OK;
 }
 
+// Radio timer (4 MHz), free-running once CMD_START_RAT has been issued in
+// oepl_rf_init(). Used for sub-second timeouts around block reception.
+uint32_t oepl_rf_rat_now(void)
+{
+    return HWREG(RFC_RAT_BASE + RFC_RAT_O_RATCNT);
+}
+
+// RF core counters for the current/last CMD_IEEE_RX session
+void oepl_rf_rx_stats(rf_rx_stats_t *st)
+{
+    st->data     = rf_rx_output.nRxData;
+    st->nok      = rf_rx_output.nRxNok;
+    st->ignored  = rf_rx_output.nRxIgnored;
+    st->buf_full = rf_rx_output.nRxBufFull;
+}
+
 uint16_t oepl_rf_rx_status(void)
 {
     return *(volatile uint16_t *)&rf_cmd_rx.status;
@@ -444,7 +519,7 @@ uint16_t oepl_rf_rx_status(void)
 void oepl_rf_rx_stop(void)
 {
     // Send CMD_ABORT to stop RX
-    RFCDoorbellSendTo(CMDR_DIR_CMD(CMD_ABORT));
+    rf_doorbell(CMDR_DIR_CMD(CMD_ABORT));
 
     // Wait for RX command to finish
     rf_wait_cmd_done(&rf_cmd_rx.status, 100000);
@@ -452,15 +527,20 @@ void oepl_rf_rx_stop(void)
 
 uint8_t *oepl_rf_rx_get(uint8_t *out_len, int8_t *out_rssi)
 {
-    if (*(volatile uint8_t *)&rx_entry->status != DATA_ENTRY_FINISHED) {
+    oepl_hw_wdt_kick();   // every RX wait loop spins on this
+    rfc_dataEntryGeneral_t *e = rx_entries[rx_rd];
+    if (*(volatile uint8_t *)&e->status != DATA_ENTRY_FINISHED) {
         return NULL;
     }
 
-    uint8_t *data = &rx_entry->data;
+    uint8_t *data = &e->data;
     uint8_t pkt_len = data[0];
 
     if (pkt_len < 2 || pkt_len > (RX_BUF_SIZE - 20)) {
+        // Malformed frame. Callers don't flush on NULL, so release the
+        // entry here or it stays FINISHED and stalls the ring.
         *out_len = 0;
+        oepl_rf_rx_flush();
         return NULL;
     }
 
@@ -470,15 +550,24 @@ uint8_t *oepl_rf_rx_get(uint8_t *out_len, int8_t *out_rssi)
     return &data[1];
 }
 
+// Drop everything still queued (e.g. leftover parts after a session ends)
+void oepl_rf_rx_flush_all(void)
+{
+    rx_queue_reset();
+}
+
+// Release the entry returned by the last oepl_rf_rx_get() and advance to the
+// next one. Must be called exactly once per non-NULL oepl_rf_rx_get().
 void oepl_rf_rx_flush(void)
 {
-    *(volatile uint8_t *)&rx_entry->status = DATA_ENTRY_PENDING;
+    *(volatile uint8_t *)&rx_entries[rx_rd]->status = DATA_ENTRY_PENDING;
+    rx_rd = (rx_rd + 1) % RX_NUM_ENTRIES;
 }
 
 void oepl_rf_shutdown(void)
 {
     // Abort any running command
-    RFCDoorbellSendTo(CMDR_DIR_CMD(CMD_ABORT));
+    rf_doorbell(CMDR_DIR_CMD(CMD_ABORT));
 
     // Wait briefly
     for (volatile uint32_t i = 0; i < 10000; i++) __asm volatile("nop");

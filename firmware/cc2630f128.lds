@@ -41,6 +41,7 @@ SECTIONS
     {
         _data = .;
         *(.data*)
+        . = ALIGN(4);   /* keep the .ramfunc load address word-aligned */
         _edata = .;
     } > SRAM AT > FLASH
 
@@ -48,7 +49,7 @@ SECTIONS
     _ldata = LOADADDR(.data);
 
     /* RAM-resident functions (copied from flash to RAM at startup) */
-    .ramfunc :
+    .ramfunc : ALIGN(4)
     {
         _ramfunc = .;
         *(.ramfunc*)

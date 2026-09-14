@@ -21,8 +21,20 @@
 static radio_state_t radio_st;
 static uint8_t tx_frame[64];
 static uint8_t g_wakeup_reason = WAKEUP_REASON_FIRSTBOOT;
+static bool g_fault_pending;
+static uint32_t g_fault_pc, g_fault_cfsr;
+#ifdef DIAG_TELEMETRY
+static bool g_diag_pending;
+static uint8_t g_diag_lqi, g_diag_temp;
+static uint16_t g_diag_bat;
+uint16_t g_diag_requests, g_diag_rf_nok, g_diag_rf_full;
+uint8_t g_xfer_last_try;
+bool g_xfer_tx_ok;
+#endif
 
 // --- Helpers ---
+
+static uint8_t mac_hdr_size(const uint8_t *pkt, uint8_t pkt_len);
 
 static void add_crc(void *p, uint8_t len)
 {
@@ -175,10 +187,26 @@ bool oepl_radio_checkin(struct AvailDataInfo *out_info)
     oepl_hw_get_voltage(&bat_mv);
     req->temperature = temp_c;
     req->batteryMv = bat_mv;
+    if (g_fault_pending) {
+        // Crash report rides in the telemetry fields for this one checkin
+        req->batteryMv = (uint16_t)(g_fault_pc & 0xFFFF);
+        req->temperature = (int8_t)((g_fault_pc >> 16) & 0xFF);
+        req->lastPacketLQI = (uint8_t)((((g_fault_cfsr >> 16) & 0xF) << 4) |
+                                       ((g_fault_cfsr >> 8) & 0xF));
+        g_fault_pending = false;
+    }
+#ifdef DIAG_TELEMETRY
+    else if (g_diag_pending) {
+        req->lastPacketLQI = g_diag_lqi;
+        req->temperature = (int8_t)g_diag_temp;
+        req->batteryMv = g_diag_bat;
+        g_diag_pending = false;
+    }
+#endif
     req->hwType = HW_TYPE;
     req->wakeupReason = g_wakeup_reason;
     req->capabilities = 0;
-    req->tagSoftwareVersion = 0x0007;
+    req->tagSoftwareVersion = TAG_FW_VERSION;
     req->currentChannel = radio_st.current_channel;
     req->customMode = 0;
     add_crc(req, sizeof(struct AvailDataReq));
@@ -263,14 +291,57 @@ bool oepl_radio_send_xfer_complete(void)
     tx_frame[sizeof(struct MacFrameNormal)] = PKT_XFER_COMPLETE;
     uint8_t tx_len = sizeof(struct MacFrameNormal) + 1;
 
-    // Start RX, then TX (explicit channel)
-    rf_status_t rc = oepl_rf_rx_start(radio_st.current_ieee_ch, 500000);
-    if (rc != RF_OK) return false;
+    // The AP answers every XferComplete with XferCompleteAck (and only acts
+    // on the first one after a checkin), so it's safe to repeat until acked.
+#ifdef DIAG_TELEMETRY
+    g_xfer_last_try = 0;
+    g_xfer_tx_ok = false;
+#endif
+    for (uint8_t attempt = 0; attempt < XFER_COMPLETE_TRIES; attempt++) {
+        if (attempt > 0) oepl_hw_delay_ms(100);
+        hdr->seq = radio_st.seq++;
 
-    rtt_puts("TX XferComplete\r\n");
-    rc = oepl_rf_tx(tx_frame, tx_len);
-    oepl_rf_rx_stop();
-    return rc == RF_OK;
+        rf_status_t rc = oepl_rf_rx_start(radio_st.current_ieee_ch,
+                                          (XFER_COMPLETE_ACK_TIMEOUT_MS + 100) * 1000UL);
+        if (rc != RF_OK) continue;
+
+        rtt_puts("TX XferComplete");
+        rc = oepl_rf_tx(tx_frame, tx_len);
+        if (rc != RF_OK) {
+            oepl_rf_rx_stop();
+            rtt_puts(" TXfail\r\n");
+            continue;
+        }
+
+#ifdef DIAG_TELEMETRY
+        g_xfer_tx_ok = true;
+#endif
+        bool acked = false;
+        uint32_t t0 = oepl_rf_rat_now();
+        while ((uint32_t)(oepl_rf_rat_now() - t0) <
+               XFER_COMPLETE_ACK_TIMEOUT_MS * RF_RAT_TICKS_PER_MS) {
+            uint8_t pkt_len;
+            int8_t rssi;
+            uint8_t *pkt = oepl_rf_rx_get(&pkt_len, &rssi);
+            if (!pkt) continue;
+            uint8_t hsz = mac_hdr_size(pkt, pkt_len);
+            if (hsz > 0 && pkt_len > hsz && pkt[hsz] == PKT_XFER_COMPLETE_ACK) acked = true;
+            oepl_rf_rx_flush();
+            if (acked) break;
+        }
+        oepl_rf_rx_stop();
+        oepl_rf_rx_flush_all();
+
+        if (acked) {
+            rtt_puts(" ACK\r\n");
+#ifdef DIAG_TELEMETRY
+            g_xfer_last_try = attempt + 1;
+#endif
+            return true;
+        }
+        rtt_puts(" noACK\r\n");
+    }
+    return false;
 }
 
 // Determine MAC header size from Frame Control field
@@ -301,9 +372,13 @@ uint8_t oepl_radio_request_block(uint8_t block_id, uint64_t data_ver, uint8_t da
     }
     if (total_parts >= BLOCK_MAX_PARTS) return total_parts;
 
+    // A first request makes the AP fetch the block from its host (pleaseWaitMs
+    // ~550ms on a C6 AP). Once we hold part of a block, ask for the rest with
+    // a PARTIAL request, which the AP serves straight from its buffer.
     struct MacFrameNormal *hdr = (struct MacFrameNormal *)tx_frame;
     build_unicast_header(hdr, radio_st.ap_mac);
-    tx_frame[sizeof(struct MacFrameNormal)] = PKT_BLOCK_REQUEST;
+    tx_frame[sizeof(struct MacFrameNormal)] =
+        (total_parts > 0) ? PKT_BLOCK_PARTIAL_REQUEST : PKT_BLOCK_REQUEST;
 
     struct BlockRequest *breq = (struct BlockRequest *)&tx_frame[sizeof(struct MacFrameNormal) + 1];
     memset(breq, 0, sizeof(struct BlockRequest));
@@ -321,8 +396,8 @@ uint8_t oepl_radio_request_block(uint8_t block_id, uint64_t data_ver, uint8_t da
     rtt_puts("BRQ b=");
     rtt_put_hex8(block_id);
 
-    // Single long RX session: covers ack + wait + all parts (15s)
-    rf_status_t rc = oepl_rf_rx_start(radio_st.current_ieee_ch, 15000000);
+    // Single long RX session: covers ack + wait + all parts
+    rf_status_t rc = oepl_rf_rx_start(radio_st.current_ieee_ch, BLOCK_RX_WINDOW_MS * 1000UL);
     if (rc != RF_OK) { rtt_puts(" RXfail\r\n"); return total_parts; }
 
     // TX block request
@@ -334,38 +409,69 @@ uint8_t oepl_radio_request_block(uint8_t block_id, uint64_t data_ver, uint8_t da
     }
     rtt_puts(" TX+\r\n");
 
-    // Receive ack + parts in one continuous RX session
+    // Receive ack + parts in one continuous RX session.
+    //
+    // The AP answers with an ACK (pleaseWaitMs), then sends the requested
+    // parts as a burst. Rather than sit out the whole RX window when a part
+    // is lost, stop once the burst has gone quiet and let the caller
+    // re-request the missing parts. Before any part has arrived, allow for
+    // the AP's pleaseWaitMs (it may be rendering the image); after parts
+    // start flowing, BLOCK_PART_TIMEOUT_MS of silence means the burst is
+    // over. Timeouts are generous because AP pacing varies widely (see
+    // oepl_radio_cc2630.h); the BP: line reports the measured gap.
     bool got_ack = false;
+    bool got_cancel = false;
     uint8_t other_pkts = 0;
+    uint8_t parts_this_req = 0;
+    uint32_t t_last = oepl_rf_rat_now();
+    uint32_t t_first_part = 0, t_last_part = 0;   // for pacing measurement
+    uint32_t idle_limit = BLOCK_ACK_TIMEOUT_MS * RF_RAT_TICKS_PER_MS;
 
-    for (volatile uint32_t w = 0; w < 30000000; w++) {
+    // Bounded by the RX window / idle timeout; the iteration cap is a backstop
+    for (volatile uint32_t w = 0; w < 200000000; w++) {
         uint8_t pkt_len;
         int8_t rssi;
         uint8_t *pkt = oepl_rf_rx_get(&pkt_len, &rssi);
         if (!pkt) {
+            if ((uint32_t)(oepl_rf_rat_now() - t_last) > idle_limit) break;
             // Periodically check if RX is still active
             if ((w & 0xFFFFF) == 0 && w > 0) {
                 if (oepl_rf_rx_status() != ACTIVE) break;
             }
             continue;
         }
+        // Only frames that are part of *our* transfer extend the wait. Other
+        // traffic (frames the address filter rejected still land in the
+        // queue, e.g. the AP serving another tag) must not keep us listening.
+        uint32_t t_now = oepl_rf_rat_now();
 
         // Parse header size from frame control
         uint8_t hsz = mac_hdr_size(pkt, pkt_len);
         if (hsz > 0 && pkt_len > hsz) {
             uint8_t pkt_type = pkt[hsz];
 
-            if (pkt_type == PKT_BLOCK_REQUEST_ACK && pkt_len >= hsz + 1 + 3) {
+            if (pkt_type == PKT_CANCEL_XFER) {
+                // AP is busy with another tag (or has nothing for us): stop
+                // listening now; the caller retries after a pause.
+                got_cancel = true;
+                oepl_rf_rx_flush();
+                break;
+            } else if (pkt_type == PKT_BLOCK_REQUEST_ACK && pkt_len >= hsz + 1 + 3) {
                 struct BlockRequestAck *ack = (struct BlockRequestAck *)&pkt[hsz + 1];
                 got_ack = true;
+                t_last = t_now;
                 rtt_puts("ACK w=");
                 rtt_put_hex8((ack->pleaseWaitMs >> 8) & 0xFF);
                 rtt_put_hex8(ack->pleaseWaitMs & 0xFF);
                 rtt_puts("\r\n");
+                // Parts follow after pleaseWaitMs; allow that plus a margin
+                idle_limit = ((uint32_t)ack->pleaseWaitMs + BLOCK_PART_TIMEOUT_MS)
+                             * RF_RAT_TICKS_PER_MS;
             } else if (pkt_type == PKT_BLOCK_PART &&
                        pkt_len >= hsz + 1 + sizeof(struct BlockPart)) {
                 struct BlockPart *bp = (struct BlockPart *)&pkt[hsz + 1];
                 if (bp->blockId == block_id && bp->blockPart < BLOCK_MAX_PARTS) {
+                    t_last = t_now;
                     uint16_t offset = (uint16_t)bp->blockPart * BLOCK_PART_DATA_SIZE;
                     uint16_t copy_len = BLOCK_PART_DATA_SIZE;
                     if (offset + copy_len > BLOCK_XFER_BUFFER_SIZE)
@@ -378,6 +484,11 @@ uint8_t oepl_radio_request_block(uint8_t block_id, uint64_t data_ver, uint8_t da
                         parts_rcvd[byte_idx] |= (1 << bit_idx);
                         total_parts++;
                     }
+                    if (parts_this_req == 0) t_first_part = t_last;
+                    t_last_part = t_last;
+                    parts_this_req++;
+                    // Burst is flowing: silence now means it's over
+                    idle_limit = BLOCK_PART_TIMEOUT_MS * RF_RAT_TICKS_PER_MS;
                 }
             } else {
                 other_pkts++;
@@ -395,9 +506,35 @@ uint8_t oepl_radio_request_block(uint8_t block_id, uint64_t data_ver, uint8_t da
     rtt_put_hex8(total_parts);
     rtt_puts("/");
     rtt_put_hex8(BLOCK_MAX_PARTS);
+    rtt_puts(" new=");
+    rtt_put_hex8(parts_this_req);
+    if (parts_this_req > 1) {
+        // Average gap between parts this request, in ms (hex)
+        uint32_t gap_ms = (t_last_part - t_first_part) / RF_RAT_TICKS_PER_MS / (parts_this_req - 1);
+        rtt_puts(" gap=");
+        rtt_put_hex8((gap_ms >> 8) & 0xFF);
+        rtt_put_hex8(gap_ms & 0xFF);
+    }
+    rf_rx_stats_t st;
+    oepl_rf_rx_stats(&st);
+#ifdef DIAG_TELEMETRY
+    g_diag_requests++;
+    g_diag_rf_nok += st.nok;
+    g_diag_rf_full += st.buf_full;
+#endif
+    rtt_puts(" rf[d=");   rtt_put_hex8(st.data);
+    rtt_puts(" nok=");    rtt_put_hex8(st.nok);
+    rtt_puts(" ign=");    rtt_put_hex8(st.ignored);
+    rtt_puts(" full=");   rtt_put_hex8(st.buf_full);
+    rtt_puts("]");
     if (!got_ack) rtt_puts(" noACK");
+    if (got_cancel) rtt_puts(" CANCEL");
     if (other_pkts) { rtt_puts(" oth="); rtt_put_hex8(other_pkts); }
     rtt_puts("\r\n");
+
+    // AP told us to back off: give the other transfer its 1.2s exclusivity
+    // window (CONCURRENT_REQUEST_DELAY on the AP) before the caller retries.
+    if (got_cancel) oepl_hw_delay_ms(1500);
 
     return total_parts;
 }
@@ -410,4 +547,22 @@ radio_state_t *oepl_radio_get_state(void)
 void oepl_radio_set_wakeup_reason(uint8_t reason)
 {
     g_wakeup_reason = reason;
+}
+
+#ifdef DIAG_TELEMETRY
+void oepl_radio_set_diag_report(uint8_t failed_blocks, uint8_t xfer,
+                                uint8_t requests, uint8_t rf_nok, uint8_t rf_full)
+{
+    g_diag_lqi = (uint8_t)((failed_blocks & 0xF) << 4) | (xfer & 0xF);
+    g_diag_temp = requests > 127 ? 127 : requests;
+    g_diag_bat = (uint16_t)rf_nok << 8 | rf_full;
+    g_diag_pending = true;
+}
+#endif
+
+void oepl_radio_set_fault_report(uint32_t pc, uint32_t cfsr)
+{
+    g_fault_pc = pc;
+    g_fault_cfsr = cfsr;
+    g_fault_pending = true;
 }

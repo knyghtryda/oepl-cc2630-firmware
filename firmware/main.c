@@ -14,6 +14,7 @@
 #include "drivers/oepl_display_driver_uc8159_600x448.h"
 #include "splash.h"
 #include "oepl_ota_cc2630.h"
+#include "fault.h"
 
 // TI driverlib
 #include "sys_ctrl.h"
@@ -32,6 +33,7 @@
 #include "interrupt.h"
 #include "hw_ints.h"
 #include "aon_ioc.h"
+#include "watchdog.h"
 
 // Block buffers for image download (4100 bytes each: 4-byte header + 4096 data)
 // bw_buf: cached B/W block (also used by OTA), red_buf: cached Red block
@@ -48,7 +50,10 @@ __attribute__((section(".noinit"))) static volatile uint32_t warmboot_magic_b;
 
 static void delay_cycles(volatile uint32_t n)
 {
-    while (n--) __asm volatile ("nop");
+    while (n--) {
+        if ((n & 0xFFFF) == 0) oepl_hw_wdt_kick();
+        __asm volatile ("nop");
+    }
 }
 
 // AON RTC interrupt handler — wakes CPU from deep sleep (WFI).
@@ -115,8 +120,15 @@ static void enter_sleep(uint32_t seconds)
 
     rtt_puts("SLEEP WFI\r\n");
 
+    // Watchdog stops in real standby. On the debugger WFI-return path the MCU
+    // domain stays up, so give it the longest budget available (~47 min).
+    WatchdogReloadSet(0xFFFFFFFF);
+    oepl_hw_wdt_kick();
+
     // Enter deep sleep
     PRCMDeepSleep();
+
+    oepl_hw_wdt_init();
 
     // --- If we reach here, WFI returned (JLink C_DEBUGEN prevents standby) ---
 
@@ -180,6 +192,20 @@ static bool do_scan_and_checkin(struct AvailDataInfo *info)
     return oepl_radio_checkin(info);
 }
 
+// Check the BlockData header the AP prepends to each block: data length and
+// a 16-bit sum of the data bytes. This catches a known AP failure mode where
+// the C6 radio's request to the ESP32 is dropped and it serves the previous
+// block's contents relabelled with the new block id.
+static bool block_checksum_ok(const uint8_t *buf, uint32_t expected_len)
+{
+    const struct BlockData *bd = (const struct BlockData *)buf;
+    if (bd->size != expected_len) return false;
+    uint16_t sum = 0;
+    for (uint32_t i = 0; i < expected_len; i++)
+        sum += buf[BLOCK_HEADER_SIZE + i];
+    return sum == bd->checksum;
+}
+
 // Download a specific block into a buffer, with retries
 // Accumulates parts across attempts — missing parts requested on retry
 bool download_block(uint8_t block_id, struct AvailDataInfo *info,
@@ -192,24 +218,31 @@ bool download_block(uint8_t block_id, struct AvailDataInfo *info,
     memset(parts_rcvd, 0, sizeof(parts_rcvd));
     memset(buf, 0x00, BLOCK_XFER_BUFFER_SIZE);
 
+    uint32_t remaining = info->dataSize - (uint32_t)block_id * BLOCK_DATA_SIZE;
+    uint32_t data_len = (remaining > BLOCK_DATA_SIZE) ? BLOCK_DATA_SIZE : remaining;
+
     uint8_t zero_count = 0;  // consecutive attempts with 0 parts received
     for (uint8_t attempt = 0; attempt < 15; attempt++) {
         if (attempt > 0) {
             rtt_puts("R");
-            oepl_hw_delay_ms(500);
+            oepl_hw_delay_ms(100);
         }
         uint8_t got = oepl_radio_request_block(block_id, info->dataVer, info->dataType,
                                                 buf, parts_rcvd);
-        if (got >= BLOCK_MAX_PARTS) {
-            rtt_puts("+");
-            *out_size = BLOCK_XFER_BUFFER_SIZE;
-            return true;
-        }
         // Accept 41/42 only after 8 attempts
-        if (got >= BLOCK_MAX_PARTS - 1 && attempt >= 7) {
-            rtt_puts("~");
-            *out_size = BLOCK_XFER_BUFFER_SIZE;
-            return true;
+        bool complete = (got >= BLOCK_MAX_PARTS) ||
+                        (got >= BLOCK_MAX_PARTS - 1 && attempt >= 7);
+        if (complete) {
+            if (block_checksum_ok(buf, data_len)) {
+                rtt_puts(got >= BLOCK_MAX_PARTS ? "+" : "~");
+                *out_size = BLOCK_XFER_BUFFER_SIZE;
+                return true;
+            }
+            // Wrong contents: start over with a full (forced) request so the
+            // AP re-fetches the block rather than resending its buffer.
+            rtt_puts("C!");
+            memset(parts_rcvd, 0, sizeof(parts_rcvd));
+            continue;
         }
         // If AP isn't responding at all (0 parts, 3 times), give up early
         if (got == 0) {
@@ -329,6 +362,10 @@ static bool download_and_display(struct AvailDataInfo *info)
     uint32_t plane_size = (uint32_t)row_bytes * height;  // 33,600 bytes
     bool has_red = (data_type == 0x21) && (data_size >= plane_size * 2);
     dl_failed_blocks = 0;
+#ifdef DIAG_TELEMETRY
+    g_diag_requests = g_diag_rf_nok = g_diag_rf_full = 0;
+    uint8_t diag_xfer = 0;
+#endif
 
     rtt_puts("DL+DISP: sz=");
     rtt_put_hex32(data_size);
@@ -404,35 +441,35 @@ static bool download_and_display(struct AvailDataInfo *info)
         rtt_puts("\r\nDATA OK\r\n");
     }
 
-    // DATA_STOP (0x11)
-    oepl_hw_gpio_set(15, false);
-    oepl_hw_spi_cs_assert();
-    { uint8_t c = 0x11; oepl_hw_spi_send_raw(&c, 1); }
-    oepl_hw_spi_cs_deassert();
-
-    // DISPLAY_REFRESH (0x12)
-    oepl_hw_gpio_set(15, false);
-    oepl_hw_spi_cs_assert();
-    { uint8_t c = 0x12; oepl_hw_spi_send_raw(&c, 1); }
-    oepl_hw_spi_cs_deassert();
-
-    rtt_puts("REF...");
-
-    // Wait for refresh (~26 seconds)
-    for (uint32_t i = 0; i < 30000; i++) {
-        if (oepl_hw_gpio_get(13)) break;  // BUSY HIGH = ready
-        oepl_hw_delay_ms(1);
-    }
-    rtt_puts("done\r\n");
+    // Refresh the panel, wait it out, power it off. XferComplete must not be
+    // sent until this returns: transmitting during the refresh's peak current
+    // draw lost the (then unacknowledged) frame on most cycles, and the AP
+    // kept re-offering the image.
+    uc8159_refresh_and_sleep();
 
     // Only send XferComplete if download was fully successful.
     // On partial failure, AP keeps data pending for retry next checkin.
     if (dl_failed_blocks == 0) {
-        oepl_radio_send_xfer_complete();
-        rtt_puts("XferComplete\r\n");
+        if (oepl_radio_send_xfer_complete()) {
+            rtt_puts("XferComplete ACKed\r\n");
+#ifdef DIAG_TELEMETRY
+            diag_xfer = g_xfer_last_try;
+#endif
+        } else {
+            rtt_puts("XferComplete NOT acked (AP will re-offer)\r\n");
+#ifdef DIAG_TELEMETRY
+            diag_xfer = g_xfer_tx_ok ? 0xF : 0xE;
+#endif
+        }
     } else {
         rtt_puts("Skipping XferComplete (retry next checkin)\r\n");
     }
+#ifdef DIAG_TELEMETRY
+    oepl_radio_set_diag_report(dl_failed_blocks, diag_xfer,
+                               (uint8_t)(g_diag_requests > 255 ? 255 : g_diag_requests),
+                               (uint8_t)(g_diag_rf_nok > 255 ? 255 : g_diag_rf_nok),
+                               (uint8_t)(g_diag_rf_full > 255 ? 255 : g_diag_rf_full));
+#endif
 
     return true;
 }
@@ -488,6 +525,43 @@ int main(void)
     rtt_put_hex8(warm_boot ? 1 : 0);
     rtt_puts("\r\n");
 
+    // Watchdog: from here on anything that hangs for ~90s gets reset.
+    oepl_hw_wdt_init();
+
+    // A watchdog reset is a warm reset with no fault record: synthesise one
+    // so it is reported like a crash (PC 0xDEADD006 = watchdog). Standby
+    // wakeups also come through reset, so only a cold boot counts.
+    if (!warm_boot && SysCtrlResetSourceGet() == RSTSRC_WARMRESET &&
+        g_fault.magic != FAULT_MAGIC) {
+        g_fault.pc = FAULT_PC_WATCHDOG;
+        g_fault.lr = g_fault.sp = g_fault.cfsr = g_fault.bfar = 0;
+        g_fault.magic = FAULT_MAGIC;
+    }
+
+    // Report a HardFault from the previous run (record written by the handler)
+    bool had_fault = (g_fault.magic == FAULT_MAGIC);
+    struct fault_record last_fault = {0};
+    char fault_str[40] = "";
+    if (had_fault) {
+        last_fault = g_fault;
+        g_fault.magic = 0;
+        rtt_puts("LAST FAULT: PC="); rtt_put_hex32(last_fault.pc);
+        rtt_puts(" LR="); rtt_put_hex32(last_fault.lr);
+        rtt_puts(" SP="); rtt_put_hex32(last_fault.sp);
+        rtt_puts(" CFSR="); rtt_put_hex32(last_fault.cfsr);
+        rtt_puts(" BFAR="); rtt_put_hex32(last_fault.bfar);
+        rtt_puts("\r\n");
+        // Shown in red on the splash so a sealed tag's crash can be read off
+        // the panel: "FAULT PC=xxxxxxxx CFSR=xxxxxxxx"
+        static const char hexd[] = "0123456789ABCDEF";
+        char *q = fault_str;
+        memcpy(q, "FAULT PC=", 9); q += 9;
+        for (int i = 28; i >= 0; i -= 4) *q++ = hexd[(last_fault.pc >> i) & 0xF];
+        memcpy(q, " CFSR=", 6); q += 6;
+        for (int i = 28; i >= 0; i -= 4) *q++ = hexd[(last_fault.cfsr >> i) & 0xF];
+        *q = 0;
+    }
+
     // Print MAC in human-readable form
     uint8_t mac[8];
     oepl_rf_get_mac(mac);
@@ -522,10 +596,19 @@ int main(void)
         oepl_hw_get_temperature(&temp_c);
         oepl_hw_get_voltage(&bat_mv);
         radio_state_t *rst = oepl_radio_get_state();
-        splash_display(mac, bat_mv, temp_c, splash_ch >= 0, rst->current_ieee_ch);
+        splash_display(mac, bat_mv, temp_c, splash_ch >= 0, rst->current_ieee_ch,
+                       had_fault ? fault_str : NULL);
         rtt_puts("SPLASH: done\r\n");
     } else {
         rtt_puts("WARM BOOT: skipping splash\r\n");
+    }
+
+    // Tell the AP the first checkin after a crash is a fault reset (0xFE);
+    // it shows up as wakeupReason in the AP tag DB, with the fault PC/status
+    // encoded in that one checkin's battery/temperature/LQI fields.
+    if (had_fault) {
+        oepl_radio_set_wakeup_reason(WAKEUP_REASON_WDT_RESET);
+        oepl_radio_set_fault_report(last_fault.pc, last_fault.cfsr);
     }
 
     // --- Main loop: periodic checkin + sleep ---

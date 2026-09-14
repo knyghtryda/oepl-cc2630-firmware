@@ -17,7 +17,10 @@ Custom open-source OEPL firmware for the Solum TG-GR6000N 6.0" BWR e-paper tag.
 - [x] RF core boot and IEEE 802.15.4 radio
 - [x] AP channel scanning (6 channels: 11, 15, 20, 25, 26, 27)
 - [x] OEPL checkin protocol (AvailDataReq/AvailDataInfo)
-- [x] Block transfer with cumulative part tracking (42 parts/block)
+- [x] Block transfer with cumulative part tracking (42 parts/block), 8-entry RX ring, burst idle-timeout
+- [x] OTA firmware update via the AP (`tools/ap.py ota`)
+- [x] Crash/hang recovery: HardFault, RF-core hang and watchdog reset the tag and report `wakeupReason=0xFE` (fault PC on the splash and in the AP DB)
+- [x] Panel powered off and deep-slept after every refresh
 - [x] UC8159 display driver with OTP waveform loading
 - [x] BWR (black/white/red) image display - 1bpp per layer, 17 blocks
 - [x] Sleep mode with RF shutdown between checkins
@@ -25,7 +28,7 @@ Custom open-source OEPL firmware for the Solum TG-GR6000N 6.0" BWR e-paper tag.
 - [x] SEGGER RTT debug output (512-byte buffer)
 - [x] UART TX debug output on DIO3 at 115200 baud
 
-**Firmware size**: ~11.8KB flash, 20KB RAM (fits CC2630F128 limits)
+**Firmware**: v0.15 — ~18KB flash, 13KB static RAM (see `PLAN.md` for history, `DEVELOPMENT.md` for the test loop)
 
 ## Project Structure
 
@@ -47,6 +50,8 @@ oepl-cc2630-firmware/
 ├── docs/                 Analysis and development documentation
 ├── reference/            Stock firmware binaries and OEPL reference binary
 └── tools/                Utility scripts
+    ├── ap.py             AP helper: OTA push, image push, poll tag state, decode fault/diag reports
+    ├── ap_log.py         Stream the AP's live log (block requests, xfer complete, timeouts)
     ├── flash.sh          UART bootloader flash script
     ├── dl_pin.sh         D/L pin (GPIO17) control
     └── start_fw.jlink    JLink firmware launch script
@@ -149,7 +154,8 @@ the FTDI adapter used for cc2538-bsl flashing.
 
 - **DIO13 (BUSY)** always reads HIGH — likely FPC cable or hardware issue. Display refreshes work but BUSY polling runs to full timeout.
 - **AON_RTC CH0 compare** event doesn't fire — using busy-wait sleep as workaround.
-- **Channel 11 congestion** — 29 tags on channel 11, causing occasional part loss (41/42 typical, needs 2-3 retries per block).
+- **~100 s per image** — the AP delivers a full block on the first request only sometimes (~3 requests/block, AP-side). Attempts are cheap (burst idle-timeout) so this is a speed issue, not a reliability one.
+- **Low battery looks like firmware bugs** — below ~2.9 V the radio core can hang mid-download (reported as fault `DEAD0DB0`). Check the voltage on the splash first.
 - **UART TX output** not verified working yet (RTT works reliably).
 
 ## Based On

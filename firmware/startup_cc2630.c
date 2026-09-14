@@ -18,6 +18,7 @@
 // -----------------------------------------------------------------------------
 
 #include <stdint.h>
+#include "fault.h"
 
 // Linker symbols
 extern uint32_t _estack;
@@ -178,22 +179,36 @@ static void fault_reset(void)
     while (1) __asm volatile("nop");
 }
 
+// Fault record in .noinit: survives the reset below, main() prints it at the
+// next boot and reports WAKEUP_REASON_WDT_RESET to the AP, so a crash on a
+// battery tag is visible in the AP's tag DB without a debugger attached.
+__attribute__((section(".noinit"))) volatile struct fault_record g_fault;
+
 void HardFault_Handler(void)
 {
     // Read stacked registers from MSP
     uint32_t *sp;
     __asm volatile ("mrs %0, msp" : "=r" (sp));
 
-    rtt_puts("\r\n!!! HARDFAULT !!!\r\n");
-    rtt_puts("PC="); rtt_put_hex32(sp[6]); rtt_puts("\r\n");
-    rtt_puts("LR="); rtt_put_hex32(sp[5]); rtt_puts("\r\n");
-    rtt_puts("SP="); rtt_put_hex32((uint32_t)sp); rtt_puts("\r\n");
-    rtt_puts("CFSR="); rtt_put_hex32(*(volatile uint32_t *)0xE000ED28); rtt_puts("\r\n");
-    rtt_puts("BFAR="); rtt_put_hex32(*(volatile uint32_t *)0xE000ED38); rtt_puts("\r\n");
+    g_fault.pc   = sp[6];
+    g_fault.lr   = sp[5];
+    g_fault.sp   = (uint32_t)sp;
+    g_fault.cfsr = *(volatile uint32_t *)0xE000ED28;
+    g_fault.bfar = *(volatile uint32_t *)0xE000ED38;
+    g_fault.magic = FAULT_MAGIC;
 
-    // Spin forever so RTT output is preserved for debugging.
-    // JLink can read the buffer; no reset to overwrite it.
-    while (1) __asm volatile("nop");
+    rtt_puts("\r\n!!! HARDFAULT !!!\r\n");
+    rtt_puts("PC="); rtt_put_hex32(g_fault.pc); rtt_puts("\r\n");
+    rtt_puts("LR="); rtt_put_hex32(g_fault.lr); rtt_puts("\r\n");
+    rtt_puts("SP="); rtt_put_hex32(g_fault.sp); rtt_puts("\r\n");
+    rtt_puts("CFSR="); rtt_put_hex32(g_fault.cfsr); rtt_puts("\r\n");
+    rtt_puts("BFAR="); rtt_put_hex32(g_fault.bfar); rtt_puts("\r\n");
+
+    // Give an attached RTT client a few seconds to read the above, then
+    // reset. Spinning forever here leaves a battery tag dead until its
+    // batteries are pulled; the record above preserves the diagnostics.
+    for (volatile uint32_t i = 0; i < 50000000; i++) __asm volatile("nop");
+    fault_reset();
 }
 
 void Default_Handler(void)

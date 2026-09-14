@@ -46,6 +46,7 @@ INCLUDES = \
 	-I$(DRIVERS_DIR) \
 	-I$(CONFIG_DIR) \
 	-I$(FIRMWARE_DIR)/shared \
+	-I$(CC26X0_DIR) \
 	-I$(CC26X0_INC) \
 	-I$(CC26X0_DRIVERLIB)
 
@@ -54,6 +55,14 @@ DEFINES = \
 	-DCC2630 \
 	-DOEPL_TARGET_CC2630 \
 	-DOEPL_DISPLAY_UC8159_600X448
+
+# make DIAG=1: after each image download the next checkin reports download
+# diagnostics in the LQI/temperature/battery fields instead of telemetry
+# (decoded by tools/ap.py status). Debug only.
+DIAG ?= 0
+ifeq ($(DIAG),1)
+DEFINES += -DDIAG_TELEMETRY
+endif
 
 # Compiler flags
 CFLAGS = \

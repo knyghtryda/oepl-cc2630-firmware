@@ -302,9 +302,10 @@ void oepl_ota_download_and_apply(struct AvailDataInfo *info)
         rtt_puts("OTA: dataVer saved\r\n");
     }
 
-    // Send XferComplete to AP before applying
-    oepl_radio_send_xfer_complete();
-    rtt_puts("OTA: XferComplete\r\n");
+    // Send XferComplete to AP before applying (acked; if it never gets
+    // through the AP will re-offer and oepl_ota_already_applied() answers it)
+    rtt_puts(oepl_radio_send_xfer_complete() ? "OTA: XferComplete ACKed\r\n"
+                                             : "OTA: XferComplete not acked\r\n");
 
     // Apply OTA: copy staging to active area and reboot
     // This function does NOT return on success

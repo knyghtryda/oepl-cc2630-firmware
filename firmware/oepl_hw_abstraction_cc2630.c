@@ -14,6 +14,7 @@
 #include "hw_memmap.h"
 #include "hw_types.h"  // for HWREG
 #include "aon_batmon.h"
+#include "watchdog.h"
 
 // Pin assignments — from STOCK FIRMWARE binary analysis (v29)
 // SPI pins: MOSI/MISO swapped vs OEPL HAL! Stock has mosiPin=9, misoPin=8
@@ -194,8 +195,30 @@ void oepl_hw_delay_ms(uint32_t ms)
     }
 }
 
+// --- Watchdog ---
+// The WDT is clocked at 1.5 MHz (SCLK_HF/32) and stops in standby, so deep
+// sleep needs no kicks. First expiry raises an (unhandled) interrupt, the
+// second resets the MCU: a hang is cut off after 2 x WDT_RELOAD_S. Kicks are
+// placed in the primitives every long operation already spins on
+// (delay_ms/us, RX polling, the main loop), so nothing else has to think
+// about it. A WDT reset shows up as RSTSRC_WARMRESET; main() reports it.
+#define WDT_RELOAD_S  45
+void oepl_hw_wdt_init(void)
+{
+    WatchdogReloadSet(WDT_RELOAD_S * 1500000UL);
+    WatchdogStallEnable();      // pause while halted by a debugger
+    WatchdogResetEnable();
+    WatchdogEnable();
+}
+
+void oepl_hw_wdt_kick(void)
+{
+    WatchdogIntClear();         // clearing the interrupt reloads the counter
+}
+
 void oepl_hw_delay_us(uint32_t us)
 {
+    oepl_hw_wdt_kick();
     // CC2630 at 48 MHz. Volatile loop body is ~8 cycles (LDR+SUB+STR+NOP+CMP+BNE).
     // 48 cycles/us / 8 cycles/iter = 6 iterations/us
     volatile uint32_t delay = us * 6;

@@ -56,6 +56,10 @@ bool oepl_hw_gpio_get(uint8_t pin);
  */
 void oepl_hw_delay_ms(uint32_t ms);
 void oepl_hw_delay_us(uint32_t us);
+
+// Watchdog: init once at boot; kick from anything that spins for long
+void oepl_hw_wdt_init(void);
+void oepl_hw_wdt_kick(void);
 uint32_t oepl_hw_get_time_ms(void);
 
 /**

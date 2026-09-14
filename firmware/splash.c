@@ -71,6 +71,7 @@ enum {
     TXT_BAT,        // Battery/temperature
     TXT_AP,         // AP status
     TXT_FW,         // Firmware version
+    TXT_FAULT,      // Last fault record (empty unless booting after a crash)
     NUM_TEXTS
 };
 
@@ -203,7 +204,7 @@ static void render_dithered_banner_row(uint16_t y, uint8_t *row_buf)
 // --- Main splash renderer ---
 
 void splash_display(const uint8_t *mac, uint16_t battery_mv, int8_t temp_c,
-                    bool ap_found, uint8_t channel)
+                    bool ap_found, uint8_t channel, const char *fault_str)
 {
     rtt_puts("Splash...\r\n");
 
@@ -249,7 +250,8 @@ void splash_display(const uint8_t *mac, uint16_t battery_mv, int8_t temp_c,
         [TXT_MAC]   = {166,  3, COL_BLACK, mac_str,              0, 0},
         [TXT_BAT]   = {234,  3, COL_BLACK, bat_temp_str,         0, 0},
         [TXT_AP]    = {302,  3, ap_found ? COL_BLACK : COL_RED, ap_str, 0, 0},
-        [TXT_FW]    = {404,  2, COL_BLACK, "FW v0.7",            0, 0},
+        [TXT_FW]    = {404,  2, COL_BLACK, "FW v0.15",            0, 0},
+        [TXT_FAULT] = {340,  2, COL_RED,   fault_str ? fault_str : "", 0, 0},
     };
     for (uint8_t i = 0; i < NUM_TEXTS; i++)
         precompute_text(&texts[i]);
@@ -308,24 +310,6 @@ void splash_display(const uint8_t *mac, uint16_t battery_mv, int8_t temp_c,
 
     oepl_hw_spi_cs_deassert();
 
-    // DATA_STOP (0x11)
-    oepl_hw_gpio_set(15, false);
-    oepl_hw_spi_cs_assert();
-    { uint8_t c = 0x11; oepl_hw_spi_send_raw(&c, 1); }
-    oepl_hw_spi_cs_deassert();
-
-    // DISPLAY_REFRESH (0x12)
-    oepl_hw_gpio_set(15, false);
-    oepl_hw_spi_cs_assert();
-    { uint8_t c = 0x12; oepl_hw_spi_send_raw(&c, 1); }
-    oepl_hw_spi_cs_deassert();
-
-    rtt_puts("Splash REF...");
-
-    // Wait for refresh (~26s)
-    for (uint32_t i = 0; i < 30000; i++) {
-        if (oepl_hw_gpio_get(13)) break;  // BUSY HIGH = ready
-        oepl_hw_delay_ms(1);
-    }
-    rtt_puts("done\r\n");
+    rtt_puts("Splash ");
+    uc8159_refresh_and_sleep();
 }

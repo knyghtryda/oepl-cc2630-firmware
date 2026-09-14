@@ -63,9 +63,16 @@ void uc8159_init(void);
 void uc8159_draw(const uint8_t* framebuffer, size_t len);
 
 /**
- * Put display into low-power sleep mode
+ * Put display into low-power sleep mode (power off + deep sleep).
+ * Must not be called while a refresh is in progress.
  */
 void uc8159_sleep(void);
+
+/**
+ * After streaming pixel data (DTM1 frame closed): DATA_STOP, DISPLAY_REFRESH,
+ * wait for the refresh to complete (~30s), then uc8159_sleep().
+ */
+void uc8159_refresh_and_sleep(void);
 
 /**
  * Wake display from sleep mode

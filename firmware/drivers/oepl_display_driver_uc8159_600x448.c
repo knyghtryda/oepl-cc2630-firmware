@@ -344,9 +344,54 @@ void uc8159_sleep(void)
     // Power Off
     epd_cmd(0x02);
     wait_busy(5000, "POFF");
-    // Deep Sleep
+    // BUSY on this hardware reads HIGH permanently, so wait_busy returns at
+    // once; give the power-off sequence time to finish before deep sleep.
+    oepl_hw_delay_ms(300);
+    // Deep Sleep (needs a hardware reset to wake — uc8159_wake does that)
     { uint8_t d[] = {0xA5}; epd_write(0x07, d, 1); }
     oepl_hw_delay_ms(10);
+    initialized = false;
+}
+
+// Wait for a DISPLAY_REFRESH to finish.
+//
+// BUSY (DIO13) is not usable on this hardware: it mostly reads HIGH, and
+// when it does read LOW it is only briefly, early in the refresh (see README).
+// An earlier version trusted a LOW→HIGH transition and exited after ~2s on
+// about half of all refreshes, which then lost the XferComplete sent during
+// the refresh's current spike. So: always wait a full refresh time, and only
+// use BUSY to extend the wait if it is still LOW at the end.
+// A BWR refresh on this panel takes ~15-26s.
+#define REFRESH_FIXED_MS   30000
+#define REFRESH_MAX_MS     45000
+static void wait_refresh(void)
+{
+    uint32_t low_ms = 0;
+    uint32_t t;
+    for (t = 0; t < REFRESH_MAX_MS; t++) {
+        uint8_t b = busy();
+        if (!b) low_ms++;
+        if (t >= REFRESH_FIXED_MS && b) break;
+        oepl_hw_delay_ms(1);
+    }
+    rtt_puts("REF done @");
+    rtt_put_hex32(t);
+    rtt_puts("ms, BUSY low for ");
+    rtt_put_hex32(low_ms);
+    rtt_puts("ms\r\n");
+}
+
+// Caller has streamed all pixel data inside a DTM1 frame and deasserted CS.
+// Finish the update: DATA_STOP, DISPLAY_REFRESH, wait for the panel, then
+// power it off and put it in deep sleep so it draws nothing until the next
+// uc8159_wake(). Blocks for the whole refresh (~30s).
+void uc8159_refresh_and_sleep(void)
+{
+    epd_cmd(0x11);   // DATA_STOP
+    epd_cmd(0x12);   // DISPLAY_REFRESH
+    rtt_puts("REF...");
+    wait_refresh();
+    uc8159_sleep();
 }
 
 void uc8159_wake(void)

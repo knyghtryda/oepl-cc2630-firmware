@@ -45,6 +45,20 @@ void oepl_rf_rx_flush(void);
 
 // Get RX command status (for diagnostics)
 uint16_t oepl_rf_rx_status(void);
+void oepl_rf_rx_flush_all(void);   // discard all queued frames (RX must be stopped)
+
+// Counters from the RF core's RX output struct (reset by each oepl_rf_rx_start)
+typedef struct {
+    uint8_t data;      // data frames received into the queue
+    uint8_t nok;       // frames dropped for CRC error
+    uint8_t ignored;   // frames rejected by address filtering
+    uint8_t buf_full;  // frames dropped because no RX entry was free
+} rf_rx_stats_t;
+void oepl_rf_rx_stats(rf_rx_stats_t *st);
+
+// Radio timer counter, 4 MHz ticks (valid while RF core is up)
+#define RF_RAT_TICKS_PER_MS 4000UL
+uint32_t oepl_rf_rat_now(void);
 
 // Power down the RF core
 void oepl_rf_shutdown(void);
