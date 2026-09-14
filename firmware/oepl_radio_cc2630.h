@@ -57,9 +57,9 @@
 // with the "FW vX.Y" string in splash.c. DIAG builds set bit 15 so a debug
 // build (which replaces telemetry with diagnostics) is obvious at the AP.
 #ifdef DIAG_TELEMETRY
-#define TAG_FW_VERSION  (0x8000 | 0x0010)
+#define TAG_FW_VERSION  (0x8000 | 0x0011)
 #else
-#define TAG_FW_VERSION  0x0010
+#define TAG_FW_VERSION  0x0011
 #endif
 
 // Capabilities

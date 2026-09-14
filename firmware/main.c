@@ -397,11 +397,7 @@ static bool download_and_display(struct AvailDataInfo *info)
         // Abort early if AP clearly has nothing to serve
         if (dl_failed_blocks >= 3) {
             rtt_puts("\r\nABORT: AP not serving data\r\n");
-            // Fill remaining rows with white
-            memset(row_4bpp, 0x33, 300);  // 0x33 = white/white nibbles
-            for (uint16_t remain = y; remain < height; remain++)
-                oepl_hw_spi_send_raw(row_4bpp, 300);
-            break;
+            break;   // no refresh will follow (see below), so stop streaming
         }
 
         uint32_t bw_offset = (uint32_t)y * row_bytes;
@@ -434,12 +430,25 @@ static bool download_and_display(struct AvailDataInfo *info)
     oepl_hw_spi_cs_deassert();
 
     if (dl_failed_blocks > 0) {
+        // Incomplete image: don't refresh. The panel keeps showing the last
+        // good image (its RAM now holds the partial one, but nothing is
+        // displayed until DRF), no XferComplete is sent, and the AP re-offers
+        // the image at the next check-in. Refreshing here used to paint the
+        // missing blocks white -- a whole white panel when the radio died
+        // on the first block.
         rtt_puts("\r\nDATA PARTIAL (");
         rtt_put_hex8(dl_failed_blocks);
-        rtt_puts(" failed)\r\n");
-    } else {
-        rtt_puts("\r\nDATA OK\r\n");
+        rtt_puts(" failed) -- not refreshing\r\n");
+        uc8159_sleep();
+#ifdef DIAG_TELEMETRY
+        oepl_radio_set_diag_report(dl_failed_blocks, 0,
+                                   (uint8_t)(g_diag_requests > 255 ? 255 : g_diag_requests),
+                                   (uint8_t)(g_diag_rf_nok > 255 ? 255 : g_diag_rf_nok),
+                                   (uint8_t)(g_diag_rf_full > 255 ? 255 : g_diag_rf_full));
+#endif
+        return false;
     }
+    rtt_puts("\r\nDATA OK\r\n");
 
     // Refresh the panel, wait it out, power it off. XferComplete must not be
     // sent until this returns: transmitting during the refresh's peak current
@@ -655,7 +664,8 @@ int main(void)
                     rtt_puts("*** IMAGE DISPLAYED ***\r\n");
                     oepl_radio_set_wakeup_reason(WAKEUP_REASON_TIMED);
                 } else {
-                    rtt_puts("Display failed\r\n");
+                    rtt_puts("Display failed, will retry next checkin\r\n");
+                    oepl_radio_set_wakeup_reason(WAKEUP_REASON_TIMED);
                 }
             } else {
                 rtt_puts("No pending data\r\n");
