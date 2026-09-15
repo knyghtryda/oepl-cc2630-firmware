@@ -180,6 +180,9 @@ bool oepl_radio_checkin(struct AvailDataInfo *out_info)
     struct AvailDataReq *req = (struct AvailDataReq *)&tx_frame[sizeof(struct MacFrameBcast) + 1];
     memset(req, 0, sizeof(struct AvailDataReq));
     req->lastPacketLQI = radio_st.last_lqi;
+#ifdef RF_PROBE
+    req->lastPacketLQI = 0x50 + g_rf_probe_cfg;   // which RF config this checkin used
+#endif
     req->lastPacketRSSI = radio_st.last_rssi;
     int8_t temp_c;
     uint16_t bat_mv;

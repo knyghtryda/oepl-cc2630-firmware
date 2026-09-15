@@ -89,13 +89,17 @@ Findings on the bench (Weather6, `00124B0018177B31`, RSSI −67, AP 192.168.5.4)
 
 ## Follow-ups (not blocking)
 
-- **RF front-end config is inconsistent** (`oepl_rf_cc2630.c`): `frontEndMode=0` (differential)
-  + `rf_patch_rfe_ieee` (differential) + `rf_patch_mce_ieee_s` (single-ended). TI's sets are
-  CPE+RFE for differential, CPE+MCE_s+RFE_s for single-ended; the alpha binary uses CPE only.
-  The tag's link is ~10 dB worse than the other OEPL tags in the same house (fails below
-  ~−77 dBm). Bench test with J-Link attached (never over the air): try {CPE only},
-  {CPE+RFE}, {CPE+MCE_s+RFE_s with frontEndMode 1 or 2}; compare tag-reported RSSI at a fixed
-  spot. Determine the board's antenna feed from the PCB if possible.
+- **Radio link margin** (2026-09-15): the tag fails below ≈−77 dBm while its RX sensitivity
+  should be ≈−95. Facts: the firmware applies *no* RF patches; stock and alpha both apply
+  `rf_patch_cpe_ieee` (found in both binaries) and neither applies MCE/RFE; the stock override
+  table (stock.bin @0xF070) adds `0x000288A3` (RSSI −2 dB reporting), `0x000F8883` (LNA bias
+  trim offset 15 vs TI generic 3) and `0x00018063`. `make RF_PROBE=1` rotates five configs
+  per check-in and reports the config in LQI (`tools/rf_probe_collect.py`): at −46 dBm all
+  five read identically (uninformative), and **the probe build broke image downloads**
+  (block 1 rejected by the checksum on every config; OTA blocks fine) — cause unknown, so
+  its results are void. Next: J-Link on the bench, one config per build, at the far spot
+  (−77…−82): measure check-in success rate and `BP:` parts-per-request. Candidates in
+  order: +CPE patch; +stock overrides; +CPE+RFE.
 - Fault report is consumed on the first AvailDataReq TX even if the AP never hears it
   (`oepl_radio_cc2630.c`); keep it pending until a checkin succeeds.
 - AP `maxsleep` must stay < 20 min (radio drops pending data after 20 housekeeping minutes).

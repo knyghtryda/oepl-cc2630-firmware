@@ -676,6 +676,9 @@ int main(void)
             uint32_t wait_sec = (uint32_t)info.nextCheckIn * 60;
             if (wait_sec < 30) wait_sec = 30;
             if (wait_sec > 3600) wait_sec = 3600;
+#ifdef RF_PROBE
+            wait_sec = 60;   // one sample per minute regardless of the AP's idle request
+#endif
 
             if (use_sleep) {
                 enter_sleep(wait_sec);

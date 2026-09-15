@@ -63,6 +63,12 @@ DIAG ?= 0
 ifeq ($(DIAG),1)
 DEFINES += -DDIAG_TELEMETRY
 endif
+# make RF_PROBE=1: rotate candidate radio configurations, one per checkin,
+# reported in the LQI field (see oepl_rf_cc2630.c). Debug only.
+RF_PROBE ?= 0
+ifeq ($(RF_PROBE),1)
+DEFINES += -DRF_PROBE
+endif
 
 # Compiler flags
 CFLAGS = \
