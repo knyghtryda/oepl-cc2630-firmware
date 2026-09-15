@@ -89,6 +89,17 @@ Findings on the bench (Weather6, `00124B0018177B31`, RSSI −67, AP 192.168.5.4)
 
 ## Follow-ups (not blocking)
 
+- **RF front-end config is inconsistent** (`oepl_rf_cc2630.c`): `frontEndMode=0` (differential)
+  + `rf_patch_rfe_ieee` (differential) + `rf_patch_mce_ieee_s` (single-ended). TI's sets are
+  CPE+RFE for differential, CPE+MCE_s+RFE_s for single-ended; the alpha binary uses CPE only.
+  The tag's link is ~10 dB worse than the other OEPL tags in the same house (fails below
+  ~−77 dBm). Bench test with J-Link attached (never over the air): try {CPE only},
+  {CPE+RFE}, {CPE+MCE_s+RFE_s with frontEndMode 1 or 2}; compare tag-reported RSSI at a fixed
+  spot. Determine the board's antenna feed from the PCB if possible.
+- Fault report is consumed on the first AvailDataReq TX even if the AP never hears it
+  (`oepl_radio_cc2630.c`); keep it pending until a checkin succeeds.
+- AP `maxsleep` must stay < 20 min (radio drops pending data after 20 housekeeping minutes).
+
 - The one v0.11 HardFault (2026-09-13 10:16) was never identified; it happened at 2.9 V and
   has not recurred. Any recurrence now shows `FAULT pc=` in `tools/ap.py status`.
 - ~3 block requests per block (~100 s per image) is AP-side (C6 serves after `pleaseWaitMs`
