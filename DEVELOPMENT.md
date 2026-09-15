@@ -178,7 +178,10 @@ domain stayed up). Measure before optimising further.
 Check-in cadence is the AP's: `min(minutes until the content's TTL, maxsleep)`,
 sent only if > 1 min and only when `stopsleep=0` or no web UI is connected.
 HA `drawcustom` defaults `ttl` to 60 s → 1-minute check-ins. The AP is set to
-`maxsleep=30`, `stopsleep=0`; the weather automation sends `ttl: 7200`.
+`maxsleep=15`, `stopsleep=0`; the weather automation sends `ttl: 7200`.
+**`maxsleep` must stay below 20**: the AP's radio drops pending data after
+20 housekeeping minutes (`MAX_XFER_ATTEMPTS`), so a tag sleeping longer than
+that can miss an image pushed just after its check-in (seen with 30).
 
 ### Long-running
 

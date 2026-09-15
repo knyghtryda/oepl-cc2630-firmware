@@ -171,7 +171,12 @@ def poll(mac, cond, timeout, what):
     t0 = time.time()
     last = None
     while time.time() - t0 < timeout:
-        t = tag(mac)
+        try:
+            t = tag(mac)
+        except Exception as e:          # the AP stalls / reboots now and then
+            print(f"[{int(time.time() - t0):4d}s] AP not answering ({e.__class__.__name__}), retrying")
+            time.sleep(10)
+            continue
         if t:
             line = fmt(t)
             if line != last:
