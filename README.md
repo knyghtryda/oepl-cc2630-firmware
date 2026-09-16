@@ -23,12 +23,12 @@ Custom open-source OEPL firmware for the Solum TG-GR6000N 6.0" BWR e-paper tag.
 - [x] Panel powered off and deep-slept after every refresh
 - [x] UC8159 display driver with OTP waveform loading
 - [x] BWR (black/white/red) image display - 1bpp per layer, 17 blocks
-- [x] Sleep mode with RF shutdown between checkins
+- [x] Standby between check-ins (TI Power_sleep sequence), ~61 µA measured
 - [x] CCFG backdoor enabled (DIO11 LOW enters bootloader)
 - [x] SEGGER RTT debug output (512-byte buffer)
 - [x] UART TX debug output on DIO3 at 115200 baud
 
-**Firmware**: v0.16 — ~18KB flash, 13KB static RAM (see `PLAN.md` for history, `DEVELOPMENT.md` for the test loop)
+**Firmware**: v0.19 — ~18KB flash, 13KB static RAM (see `PLAN.md` for history, `DEVELOPMENT.md` for the test loop)
 
 ## Project Structure
 
@@ -154,10 +154,10 @@ the FTDI adapter used for cc2538-bsl flashing.
 ## Known Issues
 
 - **DIO13 (BUSY)** always reads HIGH — likely FPC cable or hardware issue. Display refreshes work but BUSY polling runs to full timeout.
-- **AON_RTC CH0 compare** event doesn't fire — using busy-wait sleep as workaround.
+- **Sleep current ~61 µA** (v0.19, measured) — down from ~2 mA; true CC2630 standby is ~1–2 µA, the rest is unexplained (see DEVELOPMENT.md).
 - **~100 s per image** — the AP delivers a full block on the first request only sometimes (~3 requests/block, AP-side). Attempts are cheap (burst idle-timeout) so this is a speed issue, not a reliability one.
 - **Low battery looks like firmware bugs** — below ~2.9 V the radio core can hang mid-download (reported as fault `DEAD0DB0`). Check the voltage on the splash first.
-- **UART TX output** not verified working yet (RTT works reliably).
+- **UART debug mirror** off by default (`-DRTT_UART`); it never produced output on this board and kept the serial domain powered. Use RTT.
 
 ## Based On
 

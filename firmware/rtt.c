@@ -73,7 +73,7 @@ static RTT_CB _SEGGER_RTT __attribute__((used)) = {
     }}
 };
 
-static void uart_init(void)
+__attribute__((unused)) static void uart_init(void)
 {
     // SERIAL power domain should already be up (for SPI), but ensure it
     PRCMPowerDomainOn(PRCM_DOMAIN_SERIAL);
@@ -93,7 +93,7 @@ static void uart_init(void)
     UARTEnable(UART0_BASE);
 }
 
-static void uart_putc(char c)
+__attribute__((unused)) static void uart_putc(char c)
 {
     // Note: UART registers are correctly configured (verified via JLink)
     // but output doesn't reach FTDI — likely hardware path issue.
@@ -108,8 +108,12 @@ void rtt_init(void)
     // ensure the linker doesn't optimize away _SEGGER_RTT.
     (void)_SEGGER_RTT.acID[0];
 
-    // Initialize UART TX for debug output without J-Link
+#ifdef RTT_UART
+    // Mirror debug output to UART0 TX (DIO3). Off by default: it never
+    // produced output on this board's FTDI path, and it keeps the SERIAL
+    // domain and UART clock running.
     uart_init();
+#endif
 }
 
 void rtt_putc(char c)
@@ -125,8 +129,10 @@ void rtt_putc(char c)
     if (wr != _SEGGER_RTT.aUp[0].RdOff)
         _SEGGER_RTT.aUp[0].WrOff = wr;
 
+#ifdef RTT_UART
     // UART output (for FTDI serial)
     uart_putc(c);
+#endif
 }
 
 void rtt_puts(const char *s)

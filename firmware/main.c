@@ -33,6 +33,14 @@
 #include "interrupt.h"
 #include "hw_ints.h"
 #include "aon_ioc.h"
+#include "ioc.h"
+#include "gpio.h"
+#include "aux_wuc.h"
+#include "osc.h"
+#include "vims.h"
+#include "ddi.h"
+#include "hw_ddi_0_osc.h"
+#include "hw_aon_wuc.h"
 #include "watchdog.h"
 
 // Block buffers for image download (4100 bytes each: 4-byte header + 4096 data)
@@ -65,17 +73,49 @@ void AON_RTC_Handler(void)
     AONRTCEventClear(AON_RTC_CH0);
 }
 
-// Enter deep sleep with RTC-timed wakeup.
+// Enter standby with RTC-timed wakeup.
 //
-// Follows TI's SysCtrlStandby sequence: shuts down all power domains
-// (RF, PERIPH, SERIAL, CPU, VIMS), gates deep-sleep clocks, requests uLDO,
-// freezes IO, then enters standby via PRCMDeepSleep (SLEEPDEEP + WFI).
+// Sequence follows TI's PowerCC26XX.c Power_sleep() step for step: IOs
+// frozen, crystal off, AUX allowed to sleep, RF/serial/peripheral/CPU domains
+// off, uLDO requested, VIMS cache off, recharge configured, SLEEPDEEP + WFI.
+// Execution resumes after PRCMDeepSleep() on wakeup; the wake path undoes it
+// in TI's order (AUX must be back on before anything touches OSC/DDI).
 //
-// Two outcomes:
-//   1. WFI returns (JLink C_DEBUGEN blocks standby): loop continues
-//   2. Full standby → reset: warm boot detected in main() via IOC latch
+// Measured on the bench (PPK2, debugger detached): the previous version,
+// which powered off PERIPH only, sat at ~1.8 mA while "asleep".
+//
+// With a debugger attached the JTAG domain stays on, which prevents standby:
+// WFI then simply returns and the wake path runs anyway.
+static bool debugger_attached(void)
+{
+    return (HWREG(0xE000EDF0) & 0x1) != 0;   // CoreDebug DHCSR.C_DEBUGEN
+}
+
+// Once SCLK_LF runs from the 32 kHz crystal, bypass the LF clock qualifiers
+// (as TI's PowerCC26XX driver does). The qualifier measures the LF clock
+// against the HF oscillator, which keeps HF running and blocks standby:
+// measured ~1.2 mA "asleep" with them active.
+static bool lf_qualifiers_bypassed;
+#ifdef DIAG_SLEEP_ONLY
+__attribute__((section(".noinit"), used)) static uint32_t sleep_snap[16];
+#endif
+static void lf_clock_finalize(void)
+{
+    if (lf_qualifiers_bypassed) return;
+    if (OSCClockSourceGet(OSC_SRC_CLK_LF) != OSC_XOSC_LF) return;   // not switched yet
+    DDI16BitfieldWrite(AUX_DDI0_OSC_BASE, DDI_0_OSC_O_CTL0,
+                       DDI_0_OSC_CTL0_BYPASS_XOSC_LF_CLK_QUAL_M |
+                       DDI_0_OSC_CTL0_BYPASS_RCOSC_LF_CLK_QUAL_M,
+                       DDI_0_OSC_CTL0_BYPASS_RCOSC_LF_CLK_QUAL_S, 0x3);
+    OSCClockLossEventEnable();
+    lf_qualifiers_bypassed = true;
+    rtt_puts("LF clock on XOSC_LF, qualifiers bypassed\r\n");
+}
+
 static void enter_sleep(uint32_t seconds)
 {
+    lf_clock_finalize();
+
     rtt_puts("SLEEP ");
     rtt_put_hex8((seconds >> 8) & 0xFF);
     rtt_put_hex8(seconds & 0xFF);
@@ -92,61 +132,110 @@ static void enter_sleep(uint32_t seconds)
     AONRTCChannelEnable(AON_RTC_CH0);
     AONRTCEventClear(AON_RTC_CH0);
 
-    // Configure combined event to include CH0 — drives INT_AON_RTC_COMB.
-    // Without this, CH0 compare match never reaches NVIC, WFI never wakes.
+    // Combined event drives INT_AON_RTC_COMB; without it WFI never wakes.
     AONRTCCombinedEventConfig(AON_RTC_CH0);
-
-    // Clear stale NVIC pending + enable RTC NVIC interrupt
     IntPendClear(INT_AON_RTC_COMB);
     IntEnable(INT_AON_RTC_COMB);
 
-    // Save warm boot magic for WFI return path
+    // Save warm boot magic (covers a fault/reset during or after sleep)
     warmboot_magic_a = WARMBOOT_MAGIC_A;
     warmboot_magic_b = WARMBOOT_MAGIC_B;
 
-    // Route RTC CH0 to MCU wakeup event (for PRCM standby wakeup)
+    // Route RTC CH0 to MCU wakeup event
     AONEventMcuWakeUpSet(AON_EVENT_MCU_WU0, AON_EVENT_RTC_CH0);
 
-    // --- Standby configuration ---
-    // SERIAL domain off crashes consistently (tests 6-8). Skip it.
-    // PERIPH off + IOC freeze + PRCMDeepSleep = working standby.
+    bool dbg = debugger_attached();
+    rtt_puts(dbg ? "SLEEP WFI (debugger: no standby)\r\n" : "SLEEP standby\r\n");
+    // --- no RTT/peripheral/AUX access from here until the wake path restores it ---
 
-    // Power off PERIPH domain (GPIO, Timer, UDMA)
-    PRCMPowerDomainOff(PRCM_DOMAIN_PERIPH);
-
-    // Freeze IO for warm boot detection
+    // Step numbers follow TI's PowerCC26XX.c Power_sleep() (cc26x0).
+#ifdef DIAG_SLEEP_ONLY
+    sleep_snap[1] = HWREG(AUX_DDI0_OSC_BASE + DDI_0_OSC_O_CTL0);   // AUX still on here
+#endif
+    // 1. Freeze the IOs on the boundary between MCU and AON
     AONIOCFreezeEnable();
+    // 2. If XOSC_HF is active, force it off (RF init switches it back on)
+    if (OSCClockSourceGet(OSC_SRC_CLK_HF) == OSC_XOSC_HF) {
+        OSCHF_SwitchToRcOscTurnOffXosc();
+    }
+    // 3. Allow AUX to power down (it is forced on at boot and after each
+    //    wake; a forced-on AUX blocks standby -- read back as AUXCTL=1)
+    AONWUCAuxWakeupEvent(AONWUC_AUX_ALLOW_SLEEP);
+    // 4. Make sure writes take effect
+    SysCtrlAonSync();
+    // 7. Clock settings take effect
+    PRCMLoadSet();
+    // 8. Request power off of the MCU-voltage-domain domains
+    PRCMPowerDomainOff(PRCM_DOMAIN_RFCORE | PRCM_DOMAIN_SERIAL |
+                       PRCM_DOMAIN_PERIPH | PRCM_DOMAIN_CPU);
+    // 9. Request uLDO during standby (VDCTL.ULDO; without it the chip only
+    //    reaches deep sleep on the main regulator, ~1 mA measured)
+    PRCMMcuUldoConfigure(true);
+    // 10. VIMS cache off and not retained
+    uint32_t modeVIMS;
+    do { modeVIMS = VIMSModeGet(VIMS_BASE); } while (modeVIMS == VIMS_MODE_CHANGING);
+    if (modeVIMS == VIMS_MODE_ENABLED) VIMSModeSet(VIMS_BASE, VIMS_MODE_OFF);
+    PRCMCacheRetentionDisable();
+    // 11. Recharge parameters
+    SysCtrlSetRechargeBeforePowerDown(XOSC_IN_HIGH_POWER_MODE);
+    // 12. Make sure all writes have taken effect
     SysCtrlAonSync();
 
-    rtt_puts("SLEEP WFI\r\n");
+#ifdef DIAG_SLEEP_ONLY
+    // Snapshot of the power configuration at the moment of sleep (noinit)
+    sleep_snap[0]++;
+    sleep_snap[3] = HWREG(AON_WUC_BASE + AON_WUC_O_PWRSTAT);
+    sleep_snap[4] = HWREG(AON_WUC_BASE + AON_WUC_O_CTL0);
+    sleep_snap[5] = HWREG(AON_WUC_BASE + AON_WUC_O_JTAGCFG);
+    sleep_snap[7] = HWREG(PRCM_BASE + PRCM_O_PDSTAT0);
+    sleep_snap[8] = HWREG(PRCM_BASE + PRCM_O_PDSTAT1);
+    sleep_snap[10] = HWREG(PRCM_BASE + PRCM_O_PDCTL1);
+    sleep_snap[11] = HWREG(AON_WUC_BASE + AON_WUC_O_AUXCTL);
+    sleep_snap[14] = HWREG(PRCM_BASE + PRCM_O_VDCTL);
+    sleep_snap[15] = 0x5AFE5AFE;
+#endif
+    (void)dbg;
 
-    // Watchdog stops in real standby. On the debugger WFI-return path the MCU
-    // domain stays up, so give it the longest budget available (~47 min).
-    WatchdogReloadSet(0xFFFFFFFF);
-    oepl_hw_wdt_kick();
-
-    // Enter deep sleep
+    // 13. Invoke deep sleep to go to STANDBY
     PRCMDeepSleep();
 
-    oepl_hw_wdt_init();
-
-    // --- If we reach here, WFI returned (JLink C_DEBUGEN prevents standby) ---
-
+    // --- Wake ---
+    // 14. Restore VIMS and cache retention
+    if (modeVIMS == VIMS_MODE_ENABLED) VIMSModeSet(VIMS_BASE, modeVIMS);
+    PRCMCacheRetentionEnable();
+    // 15. Start forcing power to AUX
+    AONWUCAuxWakeupEvent(AONWUC_AUX_WAKEUP);
+    // 16. Re-power the peripheral domains we use (RF core stays off until RF init)
+    PRCMPowerDomainOn(PRCM_DOMAIN_SERIAL | PRCM_DOMAIN_PERIPH);
+    // 18. Clock settings take effect
+    PRCMLoadSet();
+    // 19. Release request for uLDO
+    PRCMMcuUldoConfigure(false);
+    // 21. Wait until the domains are back on
+    for (volatile uint32_t i = 0; i < 2000000; i++)
+        if (PRCMPowerDomainStatus(PRCM_DOMAIN_SERIAL | PRCM_DOMAIN_PERIPH) == PRCM_DOMAIN_POWER_ON)
+            break;
+    // 22. RTC shadow values up to date
+    SysCtrlAonSync();
+    // 24. Disable IO freeze
     AONIOCFreezeDisable();
+    SysCtrlAonSync();
+    // 25. Wait for AUX to power up (everything OSC/DDI-related needs it)
+    for (volatile uint32_t i = 0; i < 5000000; i++)
+        if (AONWUCPowerStatusGet() & AONWUC_AUX_POWER_ON) break;
+    SysCtrlAdjustRechargeAfterPowerDown(0);
+
     warmboot_magic_a = 0;
     warmboot_magic_b = 0;
     IntDisable(INT_AON_RTC_COMB);
     IntPendClear(INT_AON_RTC_COMB);
     AONRTCEventClear(AON_RTC_CH0);
 
-    // Re-enable PERIPH domain for GPIO
-    HWREG(PRCM_BASE + PRCM_O_PDCTL0PERIPH) = 1;
+    // GPIO clock back on
+    PRCMPeripheralRunEnable(PRCM_PERIPH_GPIO);
+    PRCMLoadSet();
     for (volatile uint32_t i = 0; i < 500000; i++)
-        if (HWREG(PRCM_BASE + PRCM_O_PDSTAT0PERIPH) & 1) break;
-    HWREG(PRCM_BASE + PRCM_O_GPIOCLKGR) = 0x01;
-    HWREG(PRCM_NONBUF_BASE + PRCM_O_CLKLOADCTL) = 0x01;
-    for (volatile uint32_t i = 0; i < 500000; i++)
-        if (HWREG(PRCM_BASE + PRCM_O_CLKLOADCTL) & 0x02) break;
+        if (PRCMLoadGet()) break;
 
     rtt_puts("WAKE\r\n");
 }
@@ -547,6 +636,32 @@ int main(void)
         g_fault.magic = FAULT_MAGIC;
     }
 
+#ifdef DIAG_SLEEP_ONLY
+    // make DIAG_SLEEP_ONLY=1: every DIO high-impedance except DIO5 (panel
+    // supply) held low and DIO11 (SPI flash CS) held high, no radio, no
+    // display -- just standby in a loop. The
+    // PPK2 reading is then the MCU + board floor with nothing driven.
+    for (uint8_t dio = 0; dio <= 30; dio++) {
+        if (dio == 5 || dio == 11) continue;
+        GPIO_setOutputEnableDio(dio, GPIO_OUTPUT_DISABLE);
+        IOCPortConfigureSet(dio, IOC_PORT_GPIO, IOC_NO_IOPULL | IOC_INPUT_DISABLE);
+    }
+    IOCPinTypeGpioOutput(5);
+    GPIO_setOutputEnableDio(5, GPIO_OUTPUT_ENABLE);
+    GPIO_clearDio(5);   // panel supply off (high = on: +160 uA measured)
+    IOCPinTypeGpioOutput(11);          // SPI flash CS: deselected
+    GPIO_setOutputEnableDio(11, GPIO_OUTPUT_ENABLE);
+    GPIO_setDio(11);
+    oepl_hw_flash_deep_sleep();
+    GPIO_setOutputEnableDio(9, GPIO_OUTPUT_DISABLE);
+    GPIO_setOutputEnableDio(10, GPIO_OUTPUT_DISABLE);
+    IOCPortConfigureSet(9, IOC_PORT_GPIO, IOC_NO_IOPULL | IOC_INPUT_DISABLE);
+    IOCPortConfigureSet(10, IOC_PORT_GPIO, IOC_NO_IOPULL | IOC_INPUT_DISABLE);
+
+    rtt_puts("DIAG_SLEEP_ONLY\r\n");
+    while (1) enter_sleep(20);
+#endif
+
     // Report a HardFault from the previous run (record written by the handler)
     bool had_fault = (g_fault.magic == FAULT_MAGIC);
     struct fault_record last_fault = {0};
@@ -578,14 +693,13 @@ int main(void)
     print_mac_msb(mac);
     rtt_puts("\r\n");
 
-    // --- Display pins only ---
-    // Configure the panel's control lines (RST high keeps it in the deep
-    // sleep it was left in) but do NOT run uc8159_init(): that sequence ends
-    // with the panel powered on, and on a warm boot nothing would power it
-    // off again before the next standby, so the booster would idle at ~mA for
-    // the whole sleep interval. Both draw paths call uc8159_wake() themselves.
+    // --- Board peripherals to their low-power state ---
+    // Panel: unpowered, lines released. Don't run uc8159_init() here: it
+    // powers the panel, and nothing would power it off again before standby;
+    // both draw paths call uc8159_wake(). External flash: deep power-down.
     oepl_hw_gpio_init();
-    oepl_hw_spi_init();
+    oepl_hw_epd_pins_off();
+    if (!warm_boot) oepl_hw_flash_deep_sleep();
 
     // --- Initialize RF core ---
     rf_status_t rc = oepl_rf_init();
@@ -626,11 +740,12 @@ int main(void)
     }
 
     // --- Main loop: periodic checkin + sleep ---
-    // Cold boot: first 2 checkins use busy-wait (for JLink/RTT debugging).
-    // After that, use deep standby (MCU VD powers off, RTC wakeup).
-    // Warm boot: go directly to standby sleep (already proven working).
+    // Standby (RTC wakeup) between every check-in.
     uint32_t checkin_count = 0;
-    bool use_sleep = warm_boot;
+    // Always use standby between check-ins. (Cold boots used to busy-wait
+    // the first two intervals for debugging; under a debugger the WFI simply
+    // returns, so that isn't needed, and it cost ~2 min at 6 mA per boot.)
+    bool use_sleep = true;
     while (1) {
         rtt_puts("\r\n=== Checkin #");
         rtt_put_hex32(checkin_count);
@@ -734,9 +849,6 @@ int main(void)
         }
 
         checkin_count++;
-        if (checkin_count >= 2) {
-            use_sleep = true;
-        }
     }
 
 idle:

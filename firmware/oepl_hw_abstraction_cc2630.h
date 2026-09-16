@@ -48,6 +48,9 @@ void oepl_hw_spi_read_raw(uint8_t* data, size_t len);
  * GPIO Functions
  */
 void oepl_hw_gpio_init(void);
+void oepl_hw_epd_power(bool on);   // DIO5: panel supply enable
+void oepl_hw_epd_pins_off(void);    // all panel lines high-impedance (panel unpowered)
+void oepl_hw_flash_deep_sleep(void); // external SPI flash -> deep power-down
 void oepl_hw_gpio_set(uint8_t pin, bool level);
 bool oepl_hw_gpio_get(uint8_t pin);
 

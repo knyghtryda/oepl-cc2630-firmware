@@ -163,17 +163,57 @@ preview is pixel-identical to what HA sends. Edit `build_payload()`, preview,
 push to the tag to judge it on the panel, then `install`. Needs
 `~/secrets.toml` with `[homeassistant] bearer_token_local`.
 
-## Power budget (estimate, unmeasured)
+## Power (measured on the bench, 2026-09-16)
 
-4×CR2450 in parallel ≈ 2000 mAh usable. Per day at 30-min check-ins and 12
-image updates: standby ~0.3 mAh (assumes ~12 µA: MCU standby + panel deep
-sleep + SPI flash *not* in power-down), check-ins ~0.1 mAh, updates ~6 mAh
-(download ~100 s at ~9 mA, refresh ~26 s at ~20 mA) → ~7 mAh/day → 6–9
-months, less coin-cell pulse derating. Things that would wreck it: the panel
-left powered (fixed in v0.16 — `uc8159_init` ends in PON and used to run at
-every boot), and sleep not reaching true standby (`enter_sleep` only powers
-off PERIPH; a WFI-return path was observed in v0.5 testing, i.e. the MCU
-domain stayed up). Measure before optimising further.
+Bench tag `00124B00181880B0` "OEPL-DEBUG" powered by a Nordic PPK2 at 3.0 V,
+debugger detached, power-cycled after flashing (a JTAG connection keeps the
+CC26xx debug domain on until power is cut, which blocks standby — any reading
+taken after a debugger has been attached is not a sleep measurement).
+
+| Build | Sleep floor |
+|---|---|
+| v0.18 (PERIPH off only, DIO5 high, UART mirror on) | 1950 µA |
+| + DIO5 (panel supply) low while asleep | 1790 µA |
+| + Contiki-style domain shutdown | 1055 µA |
+| sleep-only diagnostic, pins floating | 1205 µA |
+| + TI Power_sleep order: AUX released, uLDO requested | 380 µA |
+| + SPI flash CS held high (was floating) | 100 µA |
+| + SPI flash deep power-down | 93 µA |
+| **v0.19 production** (radio + display, pins in defined states) | **~61 µA** |
+
+Dead ends measured along the way: driving the panel lines low while it is
+unpowered (+570 µA: pull-ups on the board); DIO5 high (+160 µA: that's the
+panel supply, high = on); bypassing the LF clock qualifiers alone (no change,
+needed but not sufficient).
+
+Still unexplained: the last ~60 µA (CC2630 standby is ~1–2 µA). The J-Link's
+lines into the JTAG pins (which have internal pull-ups) are the next suspect —
+measure once with the J-Link unplugged.
+
+Budget at v0.19 for 4×CR2450 (~2000 mAh usable), 15-min check-ins, 12 image
+updates/day: sleep 61 µA → 1.5 mAh/day; check-ins ~1.6 µAh each → 0.15 mAh/day;
+image updates unmeasured, estimated ~0.5 mAh each → ~6 mAh/day. ≈ 7.6 mAh/day
+→ roughly 8 months before coin-cell derating. Updates now dominate; measuring
+one is the next bench item.
+
+### Bench tools
+
+```bash
+tools/ppk.py measure 300 trace.csv        # power the tag at 3.0 V and log current (1 ms averages)
+tools/ppk.py hold 60                      # just power it (the PPK2 only sources while a session is open)
+tools/ppk_analyze.py trace.csv --from 90  # average, sleep floor (median of quiet seconds), per-10 s table
+tools/jflash.sh [bin]                     # JLinkExe: reset, erase, program, verify by readback, run
+tools/rtt_log.py 600 log.txt              # timestamped RTT (needs JLinkGDBServer running)
+tools/bench_sleep.sh <label> [secs] [settle] [make args]   # build, flash, power-cycle, measure, summarise
+```
+
+`make DIAG_SLEEP_ONLY=1` builds a firmware that does nothing but standby in a
+loop (no radio, no display) and snapshots the power registers into `.noinit`
+before each sleep — for separating MCU problems from board problems.
+
+Don't trust gdb's `load` + `compare-sections` on this chip: when the halt
+lands in standby, programming silently fails and the comparison is answered
+from J-Link's flash cache. `tools/jflash.sh` resets first and reads back.
 
 Check-in cadence is the AP's: `min(minutes until the content's TTL, maxsleep)`,
 sent only if > 1 min and only when `stopsleep=0` or no web UI is connected.

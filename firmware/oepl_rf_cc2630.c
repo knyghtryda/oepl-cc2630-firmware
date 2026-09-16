@@ -613,6 +613,9 @@ void oepl_rf_rx_flush(void)
 
 void oepl_rf_shutdown(void)
 {
+    if (PRCMPowerDomainStatus(PRCM_DOMAIN_RFCORE) != PRCM_DOMAIN_POWER_ON)
+        return;   // never initialised (or already off): nothing to stop
+
     // Abort any running command
     rf_doorbell(CMDR_DIR_CMD(CMD_ABORT));
 

@@ -161,9 +161,10 @@ void uc8159_init(void)
 
     rtt_puts("\r\n=== EPD v31b ===\r\n");
 
-    // 1. Init GPIOs and SPI
+    // 1. Init GPIOs and SPI, power the panel
     oepl_hw_gpio_init();
     oepl_hw_spi_init();
+    oepl_hw_epd_power(true);
 
     // 2. Hardware reset (stock firmware: double reset)
     oepl_hw_gpio_set(PIN_RST, false);
@@ -350,6 +351,8 @@ void uc8159_sleep(void)
     // Deep Sleep (needs a hardware reset to wake — uc8159_wake does that)
     { uint8_t d[] = {0xA5}; epd_write(0x07, d, 1); }
     oepl_hw_delay_ms(10);
+    oepl_hw_epd_power(false);
+    oepl_hw_epd_pins_off();
     initialized = false;
 }
 

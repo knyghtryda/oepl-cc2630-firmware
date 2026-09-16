@@ -61,9 +61,17 @@ main.c                     boot, warm-boot detection, checkin loop, download+dis
 - **Partial images are tolerated, but not confirmed.** A block that fails
   after retries is drawn white; XferComplete is only sent when every block
   landed, so the AP re-offers the image next check-in.
-- **Deep sleep with two wake paths.** Real standby (battery tag) comes back
-  through reset with the IOC latch frozen; under a debugger WFI simply returns.
-  `.noinit` magic covers the second case. Splash only on cold boot.
+- **Standby follows TI's `Power_sleep()` step for step** (`enter_sleep` in
+  `main.c`): IOs frozen, crystal off, AUX released, RF/serial/peripheral/CPU
+  domains off, uLDO requested, VIMS cache off, recharge configured; the wake
+  path undoes it in TI's order — AUX must be powered before anything touches
+  the oscillator/DDI registers (touching them early is a BusFault). Execution
+  resumes after `PRCMDeepSleep()`; there is no reset. The LF clock qualifiers
+  are bypassed once SCLK_LF is on the 32 kHz crystal. With a debugger attached
+  the JTAG domain stays on and WFI just returns.
+- **Board parts are parked before sleep.** Panel supply (DIO5) off and its
+  lines high-impedance; external SPI flash (unused) in deep power-down with CS
+  held high. Each of these was worth tens to hundreds of µA on the PPK2.
 - **OTA copies from staging in a `.ramfunc`** because it erases the sectors
   it would otherwise be executing from. Last applied `dataVer` is recorded in
   sector 30 so the AP's re-offer doesn't loop.

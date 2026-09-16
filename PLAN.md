@@ -83,9 +83,13 @@ Findings on the bench (Weather6, `00124B0018177B31`, RSSI −67, AP 192.168.5.4)
       `stopsleep=0`; automation `ttl: 7200` → Weather6 checks in every 30 min instead of every minute.
 - [ ] Battery life on a fresh set with 12 refreshes/day — watch `batteryMv` in the AP DB.
       First-principles estimate if standby is real: ~9 mAh/day → 5–8 months (see DEVELOPMENT.md).
-- [ ] Measure sleep current on the bench (DMM mA range in series is enough to tell 12 µA from
-      300 µA from 2 mA). If it's not ~10–20 µA: finish TI's SysCtrlStandby sequence (RFC/SERIAL/
-      CPU/VIMS off, uLDO, cache retention off) and put the SPI flash in deep power-down.
+- [x] Bench: PPK2 as supply/meter, J-Link flashing with readback verify, RTT, scripted
+      flash → power-cycle → measure loop (2026-09-16).
+- [x] Sleep current 1950 µA → ~61 µA (v0.19): TI standby sequence, AUX release + uLDO, panel
+      supply off with lines released, flash CS high + deep power-down. Table in DEVELOPMENT.md.
+- [ ] Remaining ~60 µA: measure once with the J-Link unplugged.
+- [ ] Measure an image-update cycle (download + refresh) on the PPK2 — now the dominant cost.
+- [ ] Soak v0.19 on the bench tag, then OTA it to Weather6.
 
 ## Follow-ups (not blocking)
 

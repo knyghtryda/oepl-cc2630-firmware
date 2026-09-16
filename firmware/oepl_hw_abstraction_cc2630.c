@@ -28,7 +28,7 @@
 #define PIN_SPI_CS              20  // DIO20 — EPD display CS
 #define PIN_EPD_BS              18  // DIO18 — Bus select (LOW=4-wire SPI)
 #define PIN_EPD_DIR             12  // DIO12 — SDA direction (LOW=write, HIGH=read)
-#define PIN_EPD_POWER           5   // DIO5  — EPD power enable (tentative)
+#define PIN_EPD_POWER           5   // DIO5  — EPD power enable (high = on, confirmed by current draw)
 #define PIN_FLASH_CS            11  // DIO11 — SPI flash CS
 
 #define SPI_BITRATE             4000000  // 4 MHz
@@ -139,10 +139,12 @@ void oepl_hw_gpio_init(void)
     GPIO_setOutputEnableDio(PIN_EPD_DIR, GPIO_OUTPUT_ENABLE);
     GPIO_clearDio(PIN_EPD_DIR);
 
-    // EPD_POWER - output, HIGH to enable display boost converter
+    // EPD_POWER - output, LOW (panel power off). uc8159_init() raises it
+    // before talking to the panel; uc8159_sleep() drops it again. Left high,
+    // it kept the panel's supply running through every sleep.
     IOCPinTypeGpioOutput(PIN_EPD_POWER);
     GPIO_setOutputEnableDio(PIN_EPD_POWER, GPIO_OUTPUT_ENABLE);
-    GPIO_setDio(PIN_EPD_POWER);
+    GPIO_clearDio(PIN_EPD_POWER);
 
     // DC (Data/Command) - output, start LOW (command mode)
     IOCPinTypeGpioOutput(PIN_DISPLAY_DC);
@@ -168,10 +170,56 @@ void oepl_hw_gpio_init(void)
     GPIO_setOutputEnableDio(PIN_FLASH_CS, GPIO_OUTPUT_ENABLE);
     GPIO_setDio(PIN_FLASH_CS);
 
-    // Wait 100ms for EPD boost converter to stabilize
-    oepl_hw_delay_ms(100);
-
     rtt_puts("GPIO OK\r\n");
+}
+
+// Release every panel line (high impedance, no pull, input buffer off) while
+// its supply is off. Driving them high back-powers the unpowered controller;
+// driving them low fights pull-ups on the board (+570 uA measured). Floating
+// is what the bench measured lowest. uc8159_init() -> oepl_hw_gpio_init() /
+// oepl_hw_spi_init() reconfigure them before power is applied.
+void oepl_hw_epd_pins_off(void)
+{
+    static const uint8_t pins[] = {
+        PIN_DISPLAY_RST, PIN_DISPLAY_DC, PIN_SPI_CS, PIN_EPD_BS, PIN_EPD_DIR,
+        PIN_SPI_MOSI, PIN_SPI_CLK, PIN_SPI_MISO, PIN_DISPLAY_BUSY,
+    };
+    for (unsigned i = 0; i < sizeof(pins); i++) {
+        GPIO_setOutputEnableDio(pins[i], GPIO_OUTPUT_DISABLE);
+        IOCPortConfigureSet(pins[i], IOC_PORT_GPIO, IOC_NO_IOPULL | IOC_INPUT_DISABLE);
+    }
+}
+
+// Put the external SPI flash (unused by this firmware) into deep power-down:
+// command 0xB9, bit-banged on CS=DIO11 / MOSI=DIO9 / CLK=DIO10 so the SERIAL
+// domain isn't needed. CS then stays high (a floating CS cost ~280 uA).
+void oepl_hw_flash_deep_sleep(void)
+{
+    IOCPinTypeGpioOutput(PIN_SPI_MOSI); GPIO_setOutputEnableDio(PIN_SPI_MOSI, GPIO_OUTPUT_ENABLE);
+    IOCPinTypeGpioOutput(PIN_SPI_CLK);  GPIO_setOutputEnableDio(PIN_SPI_CLK, GPIO_OUTPUT_ENABLE);
+    IOCPinTypeGpioOutput(PIN_FLASH_CS); GPIO_setOutputEnableDio(PIN_FLASH_CS, GPIO_OUTPUT_ENABLE);
+    GPIO_clearDio(PIN_SPI_CLK);
+    GPIO_clearDio(PIN_FLASH_CS);
+    oepl_hw_delay_us(100);
+    for (int b = 7; b >= 0; b--) {
+        if (0xB9 & (1 << b)) GPIO_setDio(PIN_SPI_MOSI); else GPIO_clearDio(PIN_SPI_MOSI);
+        oepl_hw_delay_us(50);
+        GPIO_setDio(PIN_SPI_CLK);
+        oepl_hw_delay_us(50);
+        GPIO_clearDio(PIN_SPI_CLK);
+    }
+    GPIO_setDio(PIN_FLASH_CS);
+    oepl_hw_delay_us(100);
+}
+
+void oepl_hw_epd_power(bool on)
+{
+    if (on) {
+        GPIO_setDio(PIN_EPD_POWER);
+        oepl_hw_delay_ms(100);   // let the supply stabilise
+    } else {
+        GPIO_clearDio(PIN_EPD_POWER);
+    }
 }
 
 void oepl_hw_gpio_set(uint8_t pin, bool level)
