@@ -73,15 +73,17 @@ static void build_unicast_header(struct MacFrameNormal *f, const uint8_t *dst_ma
     memcpy(f->src, radio_st.mac, 8);
 }
 
-// Poll RX queue for a packet, with bounded wait
-// Returns pointer to received frame data, or NULL on timeout
-static uint8_t *wait_for_rx(uint32_t wait_loops, uint8_t *out_len, int8_t *out_rssi)
+// Wait up to ms for a received frame, sleeping the CPU between polls.
+// Returns pointer to received frame data, or NULL on timeout.
+static uint8_t *wait_for_rx(uint32_t ms, uint8_t *out_len, int8_t *out_rssi)
 {
-    for (volatile uint32_t w = 0; w < wait_loops; w++) {
+    uint32_t t0 = oepl_rf_rat_now();
+    for (;;) {
         uint8_t *pkt = oepl_rf_rx_get(out_len, out_rssi);
         if (pkt) return pkt;
+        if ((uint32_t)(oepl_rf_rat_now() - t0) >= ms * RF_RAT_TICKS_PER_MS) return NULL;
+        oepl_hw_idle();
     }
-    return NULL;
 }
 
 // --- Public API ---
@@ -128,7 +130,7 @@ int8_t oepl_radio_scan_channels(void)
             for (uint8_t w = 0; w < 10; w++) {
                 uint8_t pkt_len;
                 int8_t rssi;
-                uint8_t *pkt = wait_for_rx(500000, &pkt_len, &rssi);
+                uint8_t *pkt = wait_for_rx(50, &pkt_len, &rssi);
                 if (pkt) {
                     // PONG: MacFrameNormal(21) + PKT_PONG(1) + channel(1)
                     if (pkt_len >= sizeof(struct MacFrameNormal) + 2) {
@@ -153,7 +155,7 @@ int8_t oepl_radio_scan_channels(void)
                     oepl_rf_rx_flush();
                 } else {
                     // No packet — check if RX is still active
-                    if (oepl_rf_rx_status() != ACTIVE) break;
+                    if (oepl_rf_rx_ended()) break;
                 }
             }
 
@@ -236,10 +238,10 @@ bool oepl_radio_checkin(struct AvailDataInfo *out_info)
     for (uint8_t attempts = 0; attempts < 50; attempts++) {
         uint8_t pkt_len;
         int8_t rssi;
-        uint8_t *pkt = wait_for_rx(500000, &pkt_len, &rssi);
+        uint8_t *pkt = wait_for_rx(100, &pkt_len, &rssi);
         if (!pkt) {
             // No packet yet — check if RX is still active
-            if (oepl_rf_rx_status() != 0x0002) {
+            if (oepl_rf_rx_ended()) {
                 rtt_puts("RX: ended\r\n");
                 break;
             }
@@ -323,7 +325,7 @@ bool oepl_radio_send_xfer_complete(void)
             uint8_t pkt_len;
             int8_t rssi;
             uint8_t *pkt = oepl_rf_rx_get(&pkt_len, &rssi);
-            if (!pkt) continue;
+            if (!pkt) { oepl_hw_idle(); continue; }
             uint8_t hsz = mac_hdr_size(pkt, pkt_len);
             if (hsz > 0 && pkt_len > hsz && pkt[hsz] == PKT_XFER_COMPLETE_ACK) acked = true;
             oepl_rf_rx_flush();
@@ -429,8 +431,11 @@ uint8_t oepl_radio_request_block(uint8_t block_id, uint64_t data_ver, uint8_t da
     bool draining = false;          // block complete, waiting for the AP's burst to end
     uint32_t t_drain_start = 0;
 
-    // Bounded by the RX window / idle timeout; the iteration cap is a backstop
-    for (volatile uint32_t w = 0; w < 200000000; w++) {
+    // Bounded by the RX window / idle timeout, with a wall-clock backstop
+    uint32_t t_req = oepl_rf_rat_now();
+    for (;;) {
+        if ((uint32_t)(oepl_rf_rat_now() - t_req) >
+            (BLOCK_RX_WINDOW_MS + 2000) * RF_RAT_TICKS_PER_MS) break;
         uint8_t pkt_len;
         int8_t rssi;
         uint8_t *pkt = oepl_rf_rx_get(&pkt_len, &rssi);
@@ -441,10 +446,8 @@ uint8_t oepl_radio_request_block(uint8_t block_id, uint64_t data_ver, uint8_t da
         }
         if (!pkt) {
             if ((uint32_t)(oepl_rf_rat_now() - t_last) > idle_limit) break;
-            // Periodically check if RX is still active
-            if ((w & 0xFFFFF) == 0 && w > 0) {
-                if (oepl_rf_rx_status() != ACTIVE) break;
-            }
+            if (oepl_rf_rx_ended()) break;
+            oepl_hw_idle();
             continue;
         }
         // Only frames that are part of *our* transfer extend the wait. Other

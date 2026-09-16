@@ -550,6 +550,15 @@ void oepl_rf_rx_stats(rf_rx_stats_t *st)
     st->buf_full = rf_rx_output.nRxBufFull;
 }
 
+// True once the background RX command has finished (done or error). Note
+// "not ACTIVE" is not the same thing: while a foreground TX runs the RX
+// command reads IEEE_SUSPENDED (0x2001).
+bool oepl_rf_rx_ended(void)
+{
+    uint16_t st = *(volatile uint16_t *)&rf_cmd_rx.status;
+    return (st & 0x0C00) != 0;
+}
+
 uint16_t oepl_rf_rx_status(void)
 {
     return *(volatile uint16_t *)&rf_cmd_rx.status;

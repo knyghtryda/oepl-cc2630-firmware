@@ -45,6 +45,7 @@ void oepl_rf_rx_flush(void);
 
 // Get RX command status (for diagnostics)
 uint16_t oepl_rf_rx_status(void);
+bool oepl_rf_rx_ended(void);       // background RX command finished (done/error)
 void oepl_rf_rx_flush_all(void);   // discard all queued frames (RX must be stopped)
 
 // Counters from the RF core's RX output struct (reset by each oepl_rf_rx_start)

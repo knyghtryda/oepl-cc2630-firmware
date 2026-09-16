@@ -70,7 +70,7 @@ static void delay_cycles(volatile uint32_t n)
 // because the Cortex-M3 requires an NVIC-enabled interrupt to wake.
 void AON_RTC_Handler(void)
 {
-    AONRTCEventClear(AON_RTC_CH0);
+    AONRTCEventClear(AON_RTC_CH0 | AON_RTC_CH2);   // CH2: idle tick (oepl_hw_idle)
 }
 
 // Enter standby with RTC-timed wakeup.
@@ -123,6 +123,9 @@ static void enter_sleep(uint32_t seconds)
 
     // Shut down RF core (main loop will re-init after wakeup)
     oepl_rf_shutdown();
+
+    // Idle tick off, or it would wake the tag out of standby every 2 ms
+    oepl_hw_idle_tick(false);
 
     // Configure RTC wakeup (16.16 fixed-point format: seconds in upper 16 bits)
     AONRTCEnable();

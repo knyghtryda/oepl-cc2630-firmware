@@ -15,6 +15,11 @@
 #include "hw_types.h"  // for HWREG
 #include "aon_batmon.h"
 #include "watchdog.h"
+#include "cpu.h"
+#include "sys_ctrl.h"
+#include "hw_ints.h"
+#include "interrupt.h"
+#include "aon_rtc.h"
 
 // Pin assignments — from STOCK FIRMWARE binary analysis (v29)
 // SPI pins: MOSI/MISO swapped vs OEPL HAL! Stock has mosiPin=9, misoPin=8
@@ -236,11 +241,61 @@ bool oepl_hw_gpio_get(uint8_t pin)
     return (GPIO_readDio(pin) != 0);
 }
 
+// --- Idle: CPU sleep between RTC ticks ---
+// While the tag waits (radio receive windows, the ~30 s panel refresh, any
+// delay), the CPU sleeps (WFI, clocks and the RF core keep running) and wakes
+// on a 2 ms tick from AON RTC channel 2. Spinning instead cost ~3 mA on top of
+// the radio/panel for the whole wait. The tick is switched off before
+// standby (enter_sleep) so it can't wake the tag out of it.
+#define IDLE_TICK_INC   131     // 2 ms in RTC 16.16 compare units (65536 * 0.002)
+static bool idle_tick_on;
+
+void oepl_hw_idle_tick(bool on)
+{
+    if (on == idle_tick_on) return;
+    if (on) {
+        AONRTCEnable();
+        AONRTCModeCh2Set(AON_RTC_MODE_CH2_CONTINUOUS);
+        AONRTCIncValueCh2Set(IDLE_TICK_INC);
+        AONRTCCompareValueSet(AON_RTC_CH2, AONRTCCurrentCompareValueGet() + IDLE_TICK_INC);
+        AONRTCEventClear(AON_RTC_CH2);
+        AONRTCChannelEnable(AON_RTC_CH2);
+        AONRTCCombinedEventConfig(AON_RTC_CH0 | AON_RTC_CH2);
+        SysCtrlAonSync();
+        IntPendClear(INT_AON_RTC_COMB);
+        IntEnable(INT_AON_RTC_COMB);
+    } else {
+        AONRTCChannelDisable(AON_RTC_CH2);
+        AONRTCEventClear(AON_RTC_CH2);
+        AONRTCCombinedEventConfig(AON_RTC_CH0);
+        SysCtrlAonSync();
+    }
+    idle_tick_on = on;
+}
+
+void oepl_hw_idle(void)
+{
+    oepl_hw_idle_tick(true);
+    oepl_hw_wdt_kick();
+    CPUwfi();
+}
+
+// Milliseconds on the AON RTC (wraps every ~18 h; use unsigned differences)
+uint32_t oepl_hw_rtc_ms(void)
+{
+    return (uint32_t)(((uint64_t)AONRTCCurrentCompareValueGet() * 1000) >> 16);
+}
+
 void oepl_hw_delay_ms(uint32_t ms)
 {
-    for (uint32_t i = 0; i < ms; i++) {
-        oepl_hw_delay_us(1000);
+    if (ms < 3) {                         // shorter than a tick: busy-wait
+        for (uint32_t i = 0; i < ms; i++) oepl_hw_delay_us(1000);
+        return;
     }
+    uint32_t start = AONRTCCurrentCompareValueGet();
+    uint32_t span = (uint32_t)(((uint64_t)ms << 16) / 1000);
+    while ((uint32_t)(AONRTCCurrentCompareValueGet() - start) < span)
+        oepl_hw_idle();
 }
 
 // --- Watchdog ---

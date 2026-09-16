@@ -371,11 +371,11 @@ static void wait_refresh(void)
 {
     uint32_t low_ms = 0;
     uint32_t t;
-    for (t = 0; t < REFRESH_MAX_MS; t++) {
+    for (t = 0; t < REFRESH_MAX_MS; t += 10) {   // 10 ms steps: CPU sleeps in between
         uint8_t b = busy();
-        if (!b) low_ms++;
+        if (!b) low_ms += 10;
         if (t >= REFRESH_FIXED_MS && b) break;
-        oepl_hw_delay_ms(1);
+        oepl_hw_delay_ms(10);
     }
     rtt_puts("REF done @");
     rtt_put_hex32(t);
