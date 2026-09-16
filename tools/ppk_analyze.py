@@ -42,8 +42,9 @@ def main():
     n = len(ua)
     dur = n / 1000.0          # one sample per ms
     avg = sum(ua) / n
+    wall = ts[-1] - ts[0]     # the Pi drops sample blocks; charge uses wall time
     print(f"window {ts[0]:.0f}-{ts[-1]:.0f} s, {n} ms samples ({dur:.0f} s of data)")
-    print(f"average {avg:.0f} uA, charge {avg * dur / 3600 / 1000:.4f} mAh")
+    print(f"average {avg:.0f} uA, charge over {wall:.0f} s: {avg * wall / 3600 / 1000:.4f} mAh")
 
     # 1-second windows
     sec = [ua[i:i + 1000] for i in range(0, n - 999, 1000)]

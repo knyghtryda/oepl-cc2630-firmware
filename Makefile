@@ -63,18 +63,17 @@ DIAG ?= 0
 ifeq ($(DIAG),1)
 DEFINES += -DDIAG_TELEMETRY
 endif
-# make RF_PROBE=1: rotate candidate radio configurations, one per checkin,
-# reported in the LQI field (see oepl_rf_cc2630.c). Debug only.
-# Extra -D flags for bench experiments, e.g. make EXTRA_DEFINES=-DFOO
-DEFINES += $(EXTRA_DEFINES)
+# make DIAG_SLEEP_ONLY=1: standby-only build for power debugging (main.c)
 DIAG_SLEEP_ONLY ?= 0
 ifeq ($(DIAG_SLEEP_ONLY),1)
 DEFINES += -DDIAG_SLEEP_ONLY
 endif
-RF_PROBE ?= 0
-ifeq ($(RF_PROBE),1)
-DEFINES += -DRF_PROBE
+# make RF_CFG=n: radio configuration under test (see oepl_rf_cc2630.c)
+ifdef RF_CFG
+DEFINES += -DRF_CFG=$(RF_CFG)
 endif
+# Extra -D flags for bench experiments, e.g. make EXTRA_DEFINES=-DFOO
+DEFINES += $(EXTRA_DEFINES)
 
 # Compiler flags
 CFLAGS = \

@@ -28,7 +28,14 @@ DEFAULT_MV = 3000
 
 
 def open_ppk():
-    devs = PPK2_API.list_devices()
+    # The PPK2 can drop off USB and re-enumerate when a session closes; give
+    # it a few seconds to come back before giving up.
+    devs = []
+    for _ in range(20):
+        devs = PPK2_API.list_devices()
+        if devs:
+            break
+        time.sleep(0.5)
     if not devs:
         sys.exit("no PPK2 found")
     port = devs[0] if isinstance(devs[0], str) else devs[0][0]

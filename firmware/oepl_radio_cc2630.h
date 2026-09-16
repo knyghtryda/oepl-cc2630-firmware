@@ -45,6 +45,13 @@
 #define BLOCK_RX_WINDOW_MS      40000   // hard cap on one block request's RX session
 #define BLOCK_ACK_TIMEOUT_MS    2000    // no ACK/parts at all after request → AP not serving
 #define BLOCK_PART_TIMEOUT_MS   2000    // silence after ACK's pleaseWaitMs / between parts → burst over
+// The AP always transmits a full 42-frame burst, cycling whichever parts were
+// requested, and can't hear a new request while it does. Once a block is
+// complete, keep listening until the burst goes quiet before returning, or
+// the next block's request is lost (seen on every block on the bench: no ACK,
+// the tail of the old burst, a 2 s timeout, then a retry).
+#define BLOCK_DRAIN_QUIET_MS    60      // AP part spacing is ~4-6 ms
+#define BLOCK_DRAIN_MAX_MS      600     // a whole burst is ~250 ms
 
 // Wakeup reasons
 #define WAKEUP_REASON_TIMED         0
@@ -56,9 +63,7 @@
 // Firmware version as reported to the AP (`ver` in its tag DB). Keep in step
 // with the "FW vX.Y" string in splash.c. DIAG builds set bit 15 so a debug
 // build (which replaces telemetry with diagnostics) is obvious at the AP.
-#if defined(RF_PROBE)
-#define TAG_FW_VERSION  (0x4000 | 0x0013)
-#elif defined(DIAG_TELEMETRY)
+#if defined(DIAG_TELEMETRY)
 #define TAG_FW_VERSION  (0x8000 | 0x0013)
 #else
 #define TAG_FW_VERSION  0x0013

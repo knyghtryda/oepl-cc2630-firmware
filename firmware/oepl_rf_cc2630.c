@@ -31,18 +31,19 @@
 // OEPL channel map: 6 channels -> IEEE 802.15.4 channels
 const uint8_t oepl_channel_map[OEPL_NUM_CHANNELS] = {11, 15, 20, 25, 26, 27};
 
-#ifdef RF_PROBE
-// Radio configuration probe (make RF_PROBE=1): rotate through candidate
-// RF setups, one per RF init (i.e. per check-in), and tag each check-in with
-// the configuration in the LQI field (0x50 + cfg) so the AP's tag DB gives a
-// per-configuration RSSI sample. Never ship this build.
+// Radio configuration under test (make RF_CFG=n, default 0):
+//   0: no patches, Contiki-NG overrides (shipped through v0.19)
+//   1: + TI CPE IEEE patch (stock and OEPL alpha firmware both apply it)
+//   2: 1 + the stock firmware's extra overrides
+//   3: 2 + RFE IEEE patch
+#ifndef RF_CFG
+#define RF_CFG 0
+#endif
+#if RF_CFG >= 1
 #include "rf_patches/rf_patch_cpe_ieee.h"
+#endif
+#if RF_CFG >= 3
 #include "rf_patches/rf_patch_rfe_ieee.h"
-#define RF_PROBE_NUM_CFG 5
-#define RF_PROBE_MAGIC   0x5EF0B3A5
-__attribute__((section(".noinit"))) static uint32_t rf_probe_magic;
-__attribute__((section(".noinit"))) static uint32_t rf_probe_counter;
-uint8_t g_rf_probe_cfg;
 #endif
 
 // IEEE 802.15.4 overrides from Contiki-NG smartrf-settings.c
@@ -60,7 +61,7 @@ static uint32_t rf_overrides[] = {
     END_OVERRIDE
 };
 
-#ifdef RF_PROBE
+#if RF_CFG >= 2
 // Same list plus the entries the stock TG-GR6000N firmware carries and we
 // don't (stock.bin @0xF094..0xF0A8): RSSI reported 2 dB lower, LNA bias
 // current trim offset 15 (TI generic: 3), and 0x00018063.
@@ -304,20 +305,11 @@ rf_status_t oepl_rf_init(void)
     HWREG(RFC_DBELL_NONBUF_BASE + RFC_DBELL_O_RFCPEIEN) = RF_CPE_IRQ_BASE;
     HWREG(RFC_DBELL_NONBUF_BASE + RFC_DBELL_O_RFCPEIFG) = 0x0;
 
-#ifdef RF_PROBE
-    // Pick this init's configuration and apply patches accordingly
-    if (rf_probe_magic != RF_PROBE_MAGIC) { rf_probe_magic = RF_PROBE_MAGIC; rf_probe_counter = 0; }
-    g_rf_probe_cfg = rf_probe_counter++ % RF_PROBE_NUM_CFG;
-    //   A: as shipped          B: +CPE patch          C: CPE + stock overrides
-    //   D: CPE + RFE + stock   E: stock overrides only
-    bool probe_cpe = (g_rf_probe_cfg == 1 || g_rf_probe_cfg == 2 || g_rf_probe_cfg == 3);
-    bool probe_rfe = (g_rf_probe_cfg == 3);
-    bool probe_stock_ovr = (g_rf_probe_cfg >= 2);
-    if (probe_cpe) rf_patch_cpe_ieee();
-    if (probe_rfe) rf_patch_rfe_ieee();
-    rtt_puts("RF: probe cfg ");
-    rtt_put_hex8(g_rf_probe_cfg);
-    rtt_puts("\r\n");
+#if RF_CFG >= 1
+    rf_patch_cpe_ieee();
+#endif
+#if RF_CFG >= 3
+    rf_patch_rfe_ieee();
 #endif
 
     // 11. CMD_RADIO_SETUP (IEEE 802.15.4 mode, no patches needed — ROM has IEEE)
@@ -336,8 +328,8 @@ rf_status_t oepl_rf_init(void)
     rf_cmd_setup.config.bNoFsPowerUp = 0;        // Power up FS
     rf_cmd_setup.txPower = 0x9330;               // 5 dBm
     rf_cmd_setup.pRegOverride = rf_overrides;
-#ifdef RF_PROBE
-    if (probe_stock_ovr) rf_cmd_setup.pRegOverride = rf_overrides_stock;
+#if RF_CFG >= 2
+    rf_cmd_setup.pRegOverride = rf_overrides_stock;
 #endif
 
     rtt_puts("RF: SETUP...");

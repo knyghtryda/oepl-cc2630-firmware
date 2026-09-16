@@ -60,10 +60,6 @@ void oepl_rf_rx_stats(rf_rx_stats_t *st);
 #define RF_RAT_TICKS_PER_MS 4000UL
 uint32_t oepl_rf_rat_now(void);
 
-#ifdef RF_PROBE
-extern uint8_t g_rf_probe_cfg;   // configuration used by the current RF init
-#endif
-
 // Power down the RF core
 void oepl_rf_shutdown(void);
 

@@ -180,9 +180,6 @@ bool oepl_radio_checkin(struct AvailDataInfo *out_info)
     struct AvailDataReq *req = (struct AvailDataReq *)&tx_frame[sizeof(struct MacFrameBcast) + 1];
     memset(req, 0, sizeof(struct AvailDataReq));
     req->lastPacketLQI = radio_st.last_lqi;
-#ifdef RF_PROBE
-    req->lastPacketLQI = 0x50 + g_rf_probe_cfg;   // which RF config this checkin used
-#endif
     req->lastPacketRSSI = radio_st.last_rssi;
     int8_t temp_c;
     uint16_t bat_mv;
@@ -429,12 +426,19 @@ uint8_t oepl_radio_request_block(uint8_t block_id, uint64_t data_ver, uint8_t da
     uint32_t t_last = oepl_rf_rat_now();
     uint32_t t_first_part = 0, t_last_part = 0;   // for pacing measurement
     uint32_t idle_limit = BLOCK_ACK_TIMEOUT_MS * RF_RAT_TICKS_PER_MS;
+    bool draining = false;          // block complete, waiting for the AP's burst to end
+    uint32_t t_drain_start = 0;
 
     // Bounded by the RX window / idle timeout; the iteration cap is a backstop
     for (volatile uint32_t w = 0; w < 200000000; w++) {
         uint8_t pkt_len;
         int8_t rssi;
         uint8_t *pkt = oepl_rf_rx_get(&pkt_len, &rssi);
+        if (draining && (uint32_t)(oepl_rf_rat_now() - t_drain_start) >
+                        BLOCK_DRAIN_MAX_MS * RF_RAT_TICKS_PER_MS) {
+            if (pkt) oepl_rf_rx_flush();
+            break;
+        }
         if (!pkt) {
             if ((uint32_t)(oepl_rf_rat_now() - t_last) > idle_limit) break;
             // Periodically check if RX is still active
@@ -501,7 +505,11 @@ uint8_t oepl_radio_request_block(uint8_t block_id, uint64_t data_ver, uint8_t da
         }
 
         oepl_rf_rx_flush();
-        if (total_parts >= BLOCK_MAX_PARTS) break;
+        if (total_parts >= BLOCK_MAX_PARTS && !draining) {
+            draining = true;
+            t_drain_start = oepl_rf_rat_now();
+            idle_limit = BLOCK_DRAIN_QUIET_MS * RF_RAT_TICKS_PER_MS;
+        }
     }
     oepl_rf_rx_stop();
 
