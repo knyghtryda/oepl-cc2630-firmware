@@ -87,9 +87,14 @@ Findings on the bench (Weather6, `00124B0018177B31`, RSSI −67, AP 192.168.5.4)
       flash → power-cycle → measure loop (2026-09-16).
 - [x] Sleep current 1950 µA → ~61 µA (v0.19): TI standby sequence, AUX release + uLDO, panel
       supply off with lines released, flash CS high + deep power-down. Table in DEVELOPMENT.md.
-- [ ] Remaining ~60 µA: measure once with the J-Link unplugged.
-- [ ] Measure an image-update cycle (download + refresh) on the PPK2 — now the dominant cost.
-- [ ] Soak v0.19 on the bench tag, then OTA it to Weather6.
+- [x] Remaining ~59 µA: not the J-Link, not the battery monitor (measured). Board photo pending.
+- [x] Image update measured: 0.331 mAh (v0.19) → 0.267 mAh (v0.20, CPU idles between RTC ticks).
+- [x] Drain the AP burst before the next block request (download 119 → 75 s at −68 dBm).
+- [x] RF_CFG A/B (CPE patch, stock overrides, RFE patch): no difference at −68 dBm.
+- [x] Back-off on failed check-ins and updates (30 s doubling to 15 min), bench-tested with forced failures.
+- [ ] Soak v0.20 on the bench tag (debugger detached), then OTA it to Weather6.
+- [ ] Radio configs at the real edge (−77 dBm or worse) if a spot like that is available.
+- [ ] Identify the remaining ~59 µA from the board photo.
 
 ## Follow-ups (not blocking)
 

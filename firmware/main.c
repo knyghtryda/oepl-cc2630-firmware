@@ -243,6 +243,21 @@ static void enter_sleep(uint32_t seconds)
     rtt_puts("WAKE\r\n");
 }
 
+// Retry interval after `streak` consecutive failures: RETRY_MIN_S doubling,
+// capped at RETRY_MAX_S (see the main loop)
+#ifndef RETRY_MIN_S
+#define RETRY_MIN_S 30
+#endif
+#ifndef RETRY_MAX_S
+#define RETRY_MAX_S 900
+#endif
+static uint32_t retry_backoff_s(uint8_t streak)
+{
+    uint32_t s = RETRY_MIN_S;
+    while (streak-- > 0 && s < RETRY_MAX_S) s <<= 1;
+    return s > RETRY_MAX_S ? RETRY_MAX_S : s;
+}
+
 static void print_mac_msb(const uint8_t *mac_lsb)
 {
     // Print MAC in human-readable MSB-first order (reverse of wire order)
@@ -744,11 +759,17 @@ int main(void)
 
     // --- Main loop: periodic checkin + sleep ---
     // Standby (RTC wakeup) between every check-in.
+    //
+    // Back-off: when the AP can't be reached (AP down, out of range) or an
+    // update can't be completed, retry after 30 s, 60 s, 120 s ... up to
+    // 15 min instead of every 30 s. A failed check-in can cost ~30 s of
+    // receive (scan plus direct check-in on every channel) and a failed
+    // download up to a couple of minutes at ~8 mA; at a fixed 30 s retry a
+    // tag in a bad spot could spend tens of mAh a day on nothing. 15 min
+    // stays inside the AP's 20-minute window for pending data.
     uint32_t checkin_count = 0;
-    // Always use standby between check-ins. (Cold boots used to busy-wait
-    // the first two intervals for debugging; under a debugger the WFI simply
-    // returns, so that isn't needed, and it cost ~2 min at 6 mA per boot.)
-    bool use_sleep = true;
+    uint8_t checkin_fail_streak = 0;
+    uint8_t xfer_fail_streak = 0;
     while (1) {
         rtt_puts("\r\n=== Checkin #");
         rtt_put_hex32(checkin_count);
@@ -757,9 +778,15 @@ int main(void)
         struct AvailDataInfo info;
         memset(&info, 0, sizeof(info));
 
+#ifdef BENCH_FORCE_CHECKIN_FAIL
+        bool checkin_ok = false;
+#else
         bool checkin_ok = do_scan_and_checkin(&info);
+#endif
+        uint32_t wait_sec;
 
         if (checkin_ok) {
+            checkin_fail_streak = 0;
             rtt_puts("Checkin OK: dataType=");
             rtt_put_hex8(info.dataType);
             rtt_puts(" nextCheckIn=");
@@ -767,57 +794,68 @@ int main(void)
             rtt_put_hex8(info.nextCheckIn & 0xFF);
             rtt_puts("\r\n");
 
+            bool xfer_failed = false;
+            bool xfer_done = false;   // only a completed update clears the failure streak
             if (info.dataType == DATATYPE_FW_UPDATE) {
                 if (oepl_ota_already_applied(info.dataVer)) {
                     rtt_puts("OTA: already applied, sending XferComplete\r\n");
                     oepl_radio_send_xfer_complete();
+                    xfer_done = true;
                 } else {
                     rtt_puts("*** FW UPDATE ***\r\n");
                     oepl_ota_download_and_apply(&info);
                     // Returns only on failure — will retry next checkin
                     rtt_puts("FW update failed, retry later\r\n");
+                    xfer_failed = true;
                 }
             } else if (info.dataType != DATATYPE_NOUPDATE) {
-                if (download_and_display(&info)) {
+#ifdef BENCH_FORCE_XFER_FAIL
+                bool shown = false;
+#else
+                bool shown = download_and_display(&info);
+#endif
+                if (shown) {
                     rtt_puts("*** IMAGE DISPLAYED ***\r\n");
-                    oepl_radio_set_wakeup_reason(WAKEUP_REASON_TIMED);
+                    xfer_done = true;
                 } else {
-                    rtt_puts("Display failed, will retry next checkin\r\n");
-                    oepl_radio_set_wakeup_reason(WAKEUP_REASON_TIMED);
+                    rtt_puts("Display failed, will retry\r\n");
+                    xfer_failed = true;
                 }
+                oepl_radio_set_wakeup_reason(WAKEUP_REASON_TIMED);
             } else {
                 rtt_puts("No pending data\r\n");
                 oepl_radio_set_wakeup_reason(WAKEUP_REASON_TIMED);
             }
 
             // AP sends nextCheckIn in minutes; convert to seconds
-            uint32_t wait_sec = (uint32_t)info.nextCheckIn * 60;
-            if (wait_sec < 30) wait_sec = 30;
+            wait_sec = (uint32_t)info.nextCheckIn * 60;
+            if (wait_sec < RETRY_MIN_S) wait_sec = RETRY_MIN_S;
             if (wait_sec > 3600) wait_sec = 3600;
 
-            if (use_sleep) {
-                enter_sleep(wait_sec);
-            } else {
-                rtt_puts("Sleep ");
-                rtt_put_hex8((wait_sec >> 8) & 0xFF);
-                rtt_put_hex8(wait_sec & 0xFF);
-                rtt_puts("s (busy)\r\n");
-                for (uint32_t s = 0; s < wait_sec; s++)
-                    delay_cycles(8000000);
+            if (xfer_failed) {
+                if (xfer_fail_streak < 8) xfer_fail_streak++;
+                uint32_t b = retry_backoff_s(xfer_fail_streak);
+                if (b > wait_sec) wait_sec = b;
+                rtt_puts("Update failed x");
+                rtt_put_hex8(xfer_fail_streak);
+                rtt_puts(", back off\r\n");
+            } else if (xfer_done) {
+                // (A "no pending data" check-in doesn't reset it: the AP can
+                // flap between offering and not offering the same image.)
+                xfer_fail_streak = 0;
             }
         } else {
-            if (use_sleep) {
-                rtt_puts("Checkin failed, retry in 30s\r\n");
-                enter_sleep(30);
-            } else {
-                rtt_puts("Checkin failed, retry in 30s (busy)\r\n");
-                for (uint32_t s = 0; s < 30; s++)
-                    delay_cycles(8000000);
-            }
+            wait_sec = retry_backoff_s(checkin_fail_streak);
+            if (checkin_fail_streak < 8) checkin_fail_streak++;
+            rtt_puts("Checkin failed x");
+            rtt_put_hex8(checkin_fail_streak);
+            rtt_puts(", back off\r\n");
         }
 
+        enter_sleep(wait_sec);
+
         // After sleep, RF core was shut down — re-init before next checkin
-        if (use_sleep) {
+        {
             bool rf_ok = false;
             for (uint8_t retry = 0; retry < 5; retry++) {
                 if (retry > 0) {

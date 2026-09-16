@@ -186,15 +186,41 @@ unpowered (+570 µA: pull-ups on the board); DIO5 high (+160 µA: that's the
 panel supply, high = on); bypassing the LF clock qualifiers alone (no change,
 needed but not sufficient).
 
-Still unexplained: the last ~60 µA (CC2630 standby is ~1–2 µA). The J-Link's
-lines into the JTAG pins (which have internal pull-ups) are the next suspect —
-measure once with the J-Link unplugged.
+Still unexplained: the last ~59 µA (CC2630 standby is ~1–2 µA). Ruled out by
+measurement: the J-Link (59.6 µA unplugged vs 59.2 µA attached) and the
+battery monitor (59.5 µA with it off during sleep). Probably on the board;
+needs a look at the PCB.
 
-Budget at v0.19 for 4×CR2450 (~2000 mAh usable), 15-min check-ins, 12 image
-updates/day: sleep 61 µA → 1.5 mAh/day; check-ins ~1.6 µAh each → 0.15 mAh/day;
-image updates unmeasured, estimated ~0.5 mAh each → ~6 mAh/day. ≈ 7.6 mAh/day
-→ roughly 8 months before coin-cell derating. Updates now dominate; measuring
-one is the next bench item.
+### One image update (v0.20, same tag, debugger detached)
+
+| | Receive current | Charge per update |
+|---|---|---|
+| v0.19 (CPU spinning in wait loops) | 9.99 mA | 0.331 mAh |
+| v0.20 (CPU sleeps between 2 ms RTC ticks) | 8.38 mA | 0.267 mAh |
+
+~115 s awake per update: ~75–100 s download + ~30 s refresh. The panel
+refresh itself isn't a big spike (~10 mA including radio-off CPU wait).
+
+A failed update can cost far more: before back-off, 1.2 mAh was measured over
+9 minutes of fruitless attempts at the bench tag's weak spot. v0.20 backs
+off (30 s doubling to 15 min) on failed check-ins and failed updates.
+
+Budget at v0.20 for 4×CR2450 (~2000 mAh usable), 15-min check-ins, 12 image
+updates/day: sleep 59 µA → 1.4 mAh/day; check-ins ~0.15 mAh/day; updates
+0.27 mAh × 12 → 3.2 mAh/day. ≈ 4.8 mAh/day → on the order of a year before
+coin-cell derating, if updates succeed first time.
+
+### Radio link (bench tag at −68 dBm)
+
+`tools/rtt_session.sh 300 log.txt` + `tools/rf_metrics.py log.txt` after an
+image push. Burst yield = parts received per 42-frame AP burst.
+
+- Draining the AP's burst before the next request: requests 68 → 43, no-ACK
+  32 → 8, download 119 s → 75 s.
+- RF_CFG 0–3 (CPE patch, stock overrides, RFE patch): all ~90% yield, 73–88 s.
+  No config difference measurable at this signal level.
+- Yield varies run to run with the room (76–91% for the same firmware on the
+  same day); compare builds back to back, not across hours.
 
 ### Bench tools
 
@@ -205,7 +231,13 @@ tools/ppk_analyze.py trace.csv --from 90  # average, sleep floor (median of quie
 tools/jflash.sh [bin]                     # JLinkExe: reset, erase, program, verify by readback, run
 tools/rtt_log.py 600 log.txt              # timestamped RTT (needs JLinkGDBServer running)
 tools/bench_sleep.sh <label> [secs] [settle] [make args]   # build, flash, power-cycle, measure, summarise
+tools/update_charge.py trace.csv --from 75  # charge of the update window in a trace
+tools/rtt_session.sh 300 log.txt          # power + RTT log (debugger attached: no standby)
+tools/rf_metrics.py log.txt               # burst yield, no-ACK, CRC errors, download time
 ```
+
+Test switches (bench only): `EXTRA_DEFINES="-DBENCH_FORCE_CHECKIN_FAIL -DRETRY_MIN_S=5 -DRETRY_MAX_S=80"`
+(or `-DBENCH_FORCE_XFER_FAIL`) exercise the back-off in minutes.
 
 `make DIAG_SLEEP_ONLY=1` builds a firmware that does nothing but standby in a
 loop (no radio, no display) and snapshots the power registers into `.noinit`
