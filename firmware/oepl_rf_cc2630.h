@@ -48,6 +48,15 @@ uint16_t oepl_rf_rx_status(void);
 bool oepl_rf_rx_ended(void);       // background RX command finished (done/error)
 void oepl_rf_rx_flush_all(void);   // discard all queued frames (RX must be stopped)
 
+// The RF core stopped acknowledging the doorbell. The current radio operation
+// has failed; the core is powered off before the next sleep and re-initialised
+// on the next wake, which clears it. Reported to the AP once (main.c).
+bool oepl_rf_hung(void);
+uint32_t oepl_rf_hung_op(void);
+uint8_t oepl_rf_hung_phase(void);
+uint8_t oepl_rf_hung_cmdsta(void);
+void oepl_rf_hung_clear(void);
+
 // Counters from the RF core's RX output struct (reset by each oepl_rf_rx_start)
 typedef struct {
     uint8_t data;      // data frames received into the queue

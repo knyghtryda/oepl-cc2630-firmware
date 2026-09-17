@@ -208,7 +208,7 @@ static void hardfault_c(uint32_t *sp)
     g_fault.sp   = (uint32_t)sp;
     g_fault.cfsr = *(volatile uint32_t *)0xE000ED28;
     g_fault.bfar = *(volatile uint32_t *)0xE000ED38;
-    g_fault.magic = FAULT_MAGIC;
+    fault_record_seal(&g_fault);
     {
         // stacked frame: r0 r1 r2 r3 r12 lr pc xpsr, then CFSR/HFSR/BFAR/MMFAR
         const uint32_t regs[] = { sp[0], sp[1], sp[2], sp[3], sp[4], sp[5], sp[6], sp[7],

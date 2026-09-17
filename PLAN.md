@@ -99,7 +99,15 @@ Findings on the bench (Weather6, `00124B0018177B31`, RSSI −67, AP 192.168.5.4)
       fault reports carry a class marker the AP can't erase (v0.21). Verified with forced faults.
 - [x] HardFault record was garbage (review M8 — MSP read after the prologue). Naked entry;
       verified: PC/LR now point at the forced fault site.
-- [ ] Find the RF doorbell hang: unattended repro run, capture the log + registers at the fault. Run 1 (2026-09-16
+- [x] **Found it** (2026-09-17, capture in scratchpad/repro/capture1): a scan that reaches OEPL
+      channel 27 (only when the AP's reply is missed on the earlier channels) hands CMD_IEEE_RX
+      an illegal channel -> IEEE_ERROR_PAR -> CPE INTERNAL_ERROR -> the doorbell stops answering,
+      including the CMD_ABORT sent to clean up. Upstream OEPL lists 27 for Telink radios; the
+      CC2630 accepts 11-26 only. Fixed in v0.22 (skip unsupported channels), plus: a hung
+      doorbell no longer resets the tag -- the RF core is powered off before sleep and
+      re-initialised on the next wake, and the event is reported to the AP.
+      This also explains Weather6's boot loop on weak batteries: missed PONG -> channel 27.
+- [ ] Confirm over a long run that the hang is gone (16 h hunt on v0.22). Run 1 (2026-09-16
       17:00) caught every download failing on AP stalls → patience fix 6ce6be1; run 2 from 17:24.
 
 ## External review (2026-09-16)

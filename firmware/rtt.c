@@ -54,8 +54,10 @@ __attribute__((section(".noinit"), used)) struct crash_capture g_crash;
 
 void crash_capture(uint32_t code, uint32_t op, const uint32_t *regs, unsigned nregs)
 {
-    uint32_t count = (g_crash.magic == CRASH_MAGIC) ? g_crash.count + 1 : 1;
+    uint32_t count = (g_crash.magic == CRASH_MAGIC && g_crash.build == FAULT_BUILD_ID)
+                     ? g_crash.count + 1 : 1;
     g_crash.magic = 0;                     // invalid while being written
+    g_crash.build = FAULT_BUILD_ID;
     g_crash.count = count;
     g_crash.code = code;
     g_crash.op = op;

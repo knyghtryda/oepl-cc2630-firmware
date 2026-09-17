@@ -100,7 +100,11 @@ int8_t oepl_radio_scan_channels(void)
 {
     rtt_puts("Scan:");
 
+#ifdef BENCH_SCAN_CH27_ONLY
+    for (uint8_t ch = OEPL_NUM_CHANNELS - 1; ch < OEPL_NUM_CHANNELS; ch++) {
+#else
     for (uint8_t ch = 0; ch < OEPL_NUM_CHANNELS; ch++) {
+#endif
         rf_status_t rc = oepl_rf_set_channel(ch);
         if (rc != RF_OK) continue;
 

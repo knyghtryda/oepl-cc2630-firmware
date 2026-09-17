@@ -154,6 +154,9 @@ static void rf_wait_boot(void)
 // would otherwise hang the tag silently; instead record a pseudo-fault and
 // reset, which main() reports to the AP as WAKEUP_REASON_WDT_RESET.
 #define RF_DOORBELL_TIMEOUT_LOOPS 2000000  // ~100ms+ at 48MHz, far above normal
+static bool rf_hung;                // doorbell stopped answering
+static uint32_t rf_hung_op;
+static uint8_t rf_hung_phase, rf_hung_cmdsta;
 
 static uint32_t rf_doorbell(uint32_t pOp)
 {
@@ -195,17 +198,22 @@ static uint32_t rf_doorbell(uint32_t pOp)
         };
         crash_capture(FAULT_PC_RF_DOORBELL, pOp, regs, sizeof(regs) / sizeof(regs[0]));
     }
-    g_fault.pc   = FAULT_PC_RF_DOORBELL;
-    g_fault.lr   = pOp;
-    g_fault.sp   = phase;
-    g_fault.cfsr = HWREG(RFC_DBELL_BASE + RFC_DBELL_O_CMDSTA);
-    g_fault.bfar = HWREG(RFC_DBELL_BASE + RFC_DBELL_O_RFCPEIFG);
-    g_fault.magic = FAULT_MAGIC;
-    for (i = 0; i < 5000000; i++) __asm volatile("nop");  // let RTT drain
-    typedef void (*reset_fn_t)(void);
-    ((reset_fn_t)((uint32_t *)0x10000048)[6])();          // ROM HAPI ResetDevice
-    while (1) __asm volatile("nop");
+    // Don't reset the tag: the RF core is powered off before every sleep and
+    // re-initialised on the next wake, so flagging the hang lets the current
+    // check-in fail and the radio come back a cycle later -- a few seconds
+    // instead of a reset, a splash redraw and a lost download.
+    rf_hung = true;
+    rf_hung_op = pOp;
+    rf_hung_phase = phase;
+    rf_hung_cmdsta = HWREG(RFC_DBELL_BASE + RFC_DBELL_O_CMDSTA);
+    return 0;     // not CMDSTA_Done: callers treat it as a failed command
 }
+
+bool oepl_rf_hung(void)          { return rf_hung; }
+uint32_t oepl_rf_hung_op(void)   { return rf_hung_op; }
+uint8_t oepl_rf_hung_phase(void) { return rf_hung_phase; }
+uint8_t oepl_rf_hung_cmdsta(void){ return rf_hung_cmdsta & 0x3F; }
+void oepl_rf_hung_clear(void)    { rf_hung = false; }
 
 static rf_status_t rf_send_cmd(uint32_t cmd_ptr)
 {
@@ -386,6 +394,19 @@ rf_status_t oepl_rf_set_channel(uint8_t oepl_channel_idx)
 
     uint8_t ieee_ch = oepl_channel_map[oepl_channel_idx];
 
+    // CMD_IEEE_RX only accepts channels 11-26. OEPL's channel list also
+    // contains 27 (a Telink-radio tag can use it); on the CC2630 that made
+    // CMD_IEEE_RX fail with IEEE_ERROR_PAR, the CPE raise INTERNAL_ERROR and
+    // then ignore the doorbell -- including the CMD_ABORT sent to clean up,
+    // which hung the radio until the tag reset itself. Captured on the bench
+    // (a scan reaches channel 27 whenever the AP's reply is missed).
+    if (ieee_ch < 11 || ieee_ch > 26) {
+        rtt_puts("RF: ch ");
+        rtt_put_hex8(ieee_ch);
+        rtt_puts(" unsupported\r\n");
+        return RF_ERR_FS;
+    }
+
     // IEEE 802.15.4: freq = 2405 + 5 * (channel - 11) MHz
     uint16_t freq_mhz = 2405 + 5 * (ieee_ch - 11);
 
@@ -485,6 +506,9 @@ rf_status_t oepl_rf_tx(const uint8_t *payload, uint8_t len)
 
 rf_status_t oepl_rf_rx_start(uint8_t ieee_channel, uint32_t timeout_us)
 {
+    if (ieee_channel != 0 && (ieee_channel < 11 || ieee_channel > 26))
+        return RF_ERR_RX;      // see oepl_rf_set_channel()
+
     // Reset RX ring so radio and firmware start the session on the same entry
     rx_queue_reset();
 
@@ -593,6 +617,7 @@ uint16_t oepl_rf_rx_status(void)
 
 void oepl_rf_rx_stop(void)
 {
+    if (rf_hung) return;
     // Send CMD_ABORT to stop RX
     rf_doorbell(CMDR_DIR_CMD(CMD_ABORT));
 
@@ -644,8 +669,8 @@ void oepl_rf_shutdown(void)
     if (PRCMPowerDomainStatus(PRCM_DOMAIN_RFCORE) != PRCM_DOMAIN_POWER_ON)
         return;   // never initialised (or already off): nothing to stop
 
-    // Abort any running command
-    rf_doorbell(CMDR_DIR_CMD(CMD_ABORT));
+    // Abort any running command (pointless if the doorbell is already hung)
+    if (!rf_hung) rf_doorbell(CMDR_DIR_CMD(CMD_ABORT));
 
     // Wait briefly
     for (volatile uint32_t i = 0; i < 10000; i++) __asm volatile("nop");

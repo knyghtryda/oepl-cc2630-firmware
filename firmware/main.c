@@ -658,10 +658,10 @@ int main(void)
     // so it is reported like a crash (PC 0xDEADD006 = watchdog). Standby
     // wakeups also come through reset, so only a cold boot counts.
     if (!warm_boot && SysCtrlResetSourceGet() == RSTSRC_WARMRESET &&
-        g_fault.magic != FAULT_MAGIC) {
+        !fault_record_valid(&g_fault)) {
         g_fault.pc = FAULT_PC_WATCHDOG;
         g_fault.lr = g_fault.sp = g_fault.cfsr = g_fault.bfar = 0;
-        g_fault.magic = FAULT_MAGIC;
+        fault_record_seal(&g_fault);
     }
 
 #ifdef DIAG_SLEEP_ONLY
@@ -691,12 +691,16 @@ int main(void)
 #endif
 
     // Report a HardFault from the previous run (record written by the handler)
-    bool had_fault = (g_fault.magic == FAULT_MAGIC);
+    bool had_fault = fault_record_valid(&g_fault);
+    // A cold boot means any crash capture in RAM predates the power cycle
+    // (SRAM keeps its contents for a moment) -- discard it, so tooling can't
+    // mistake a stale capture for a fresh one.
+    if (!had_fault) g_crash.magic = 0;
+    g_fault.magic = 0;                 // consumed (or rejected): don't re-report
     struct fault_record last_fault = {0};
     char fault_str[40] = "";
     if (had_fault) {
         last_fault = g_fault;
-        g_fault.magic = 0;
         rtt_puts("LAST FAULT: PC="); rtt_put_hex32(last_fault.pc);
         rtt_puts(" LR="); rtt_put_hex32(last_fault.lr);
         rtt_puts(" SP="); rtt_put_hex32(last_fault.sp);
@@ -807,6 +811,19 @@ int main(void)
 #else
         bool checkin_ok = do_scan_and_checkin(&info);
 #endif
+        if (oepl_rf_hung()) {
+            // Radio core wedged during this check-in: report it once and let
+            // the shutdown/re-init either side of the next sleep clear it.
+            uint32_t op = oepl_rf_hung_op();
+            uint16_t cmd = (op & 1) ? (uint16_t)(0x8000 | ((op >> 16) & 0x7FFF))
+                                    : (uint16_t)(op & 0x7FFF);
+            oepl_radio_set_fault_report(FAULT_CLASS_DOORBELL, cmd,
+                                        (uint8_t)((oepl_rf_hung_phase() & 3) << 6 |
+                                                  oepl_rf_hung_cmdsta()));
+            rtt_puts("RF hung: recovering at next wake\r\n");
+            oepl_rf_hung_clear();
+            checkin_ok = false;
+        }
         uint32_t wait_sec;
 
         if (checkin_ok) {

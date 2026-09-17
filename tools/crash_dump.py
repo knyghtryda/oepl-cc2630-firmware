@@ -46,14 +46,14 @@ def main():
     syms = symbols()
     addr, size = syms["g_crash"]
     raw = read_mem(addr, size)
-    magic, count, code, op = struct.unpack_from("<4I", raw, 0)
-    regs = struct.unpack_from("<16I", raw, 16)
-    (log_len,) = struct.unpack_from("<I", raw, 16 + 64)
-    log = raw[16 + 64 + 4:16 + 64 + 4 + min(log_len, 1024)]
+    magic, build, count, code, op = struct.unpack_from("<5I", raw, 0)
+    regs = struct.unpack_from("<16I", raw, 20)
+    (log_len,) = struct.unpack_from("<I", raw, 20 + 64)
+    log = raw[20 + 64 + 4:20 + 64 + 4 + min(log_len, 1024)]
     if magic != CRASH_MAGIC:
         print(f"no crash capture (magic 0x{magic:08X})")
         return 1
-    print(f"captures since power-up: {count}")
+    print(f"captures since power-up: {count} (build id 0x{build:08X})")
     if code == 0xDEAD0DB0:
         if op & 1:
             cid = (op >> 16) & 0xFFFF
