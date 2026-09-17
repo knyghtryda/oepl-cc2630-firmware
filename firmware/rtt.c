@@ -44,6 +44,30 @@ typedef struct {
     RTT_BUFFER_DESC aDown[1];
 } RTT_CB;
 
+// Recent-output ring for crash capture. The RTT buffer stops accepting data
+// once full when no debugger drains it, so it holds the *first* 2 KB after
+// boot; this ring always holds the *last* CRASH_LOG_SIZE characters.
+#include "fault.h"
+__attribute__((section(".noinit"))) static char crash_ring[CRASH_LOG_SIZE];
+__attribute__((section(".noinit"))) static uint32_t crash_ring_pos;
+__attribute__((section(".noinit"), used)) struct crash_capture g_crash;
+
+void crash_capture(uint32_t code, uint32_t op, const uint32_t *regs, unsigned nregs)
+{
+    uint32_t count = (g_crash.magic == CRASH_MAGIC) ? g_crash.count + 1 : 1;
+    g_crash.magic = 0;                     // invalid while being written
+    g_crash.count = count;
+    g_crash.code = code;
+    g_crash.op = op;
+    for (unsigned i = 0; i < CRASH_NREGS; i++)
+        g_crash.reg[i] = (regs && i < nregs) ? regs[i] : 0;
+    uint32_t pos = crash_ring_pos & (CRASH_LOG_SIZE - 1);
+    for (unsigned i = 0; i < CRASH_LOG_SIZE; i++)
+        g_crash.log[i] = crash_ring[(pos + i) & (CRASH_LOG_SIZE - 1)];
+    g_crash.log_len = CRASH_LOG_SIZE;
+    g_crash.magic = CRASH_MAGIC;
+}
+
 // The actual ring buffer data
 static char _aUpBuffer[RTT_BUFFER_SIZE];
 static char _aDownBuffer[16];
@@ -118,6 +142,9 @@ void rtt_init(void)
 
 void rtt_putc(char c)
 {
+    crash_ring[crash_ring_pos & (CRASH_LOG_SIZE - 1)] = c;
+    crash_ring_pos = (crash_ring_pos + 1) & (CRASH_LOG_SIZE - 1);
+
     // RTT output (for J-Link)
     unsigned wr = _SEGGER_RTT.aUp[0].WrOff;
     _aUpBuffer[wr] = c;

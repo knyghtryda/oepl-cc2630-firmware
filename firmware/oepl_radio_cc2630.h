@@ -64,9 +64,9 @@
 // with the "FW vX.Y" string in splash.c. DIAG builds set bit 15 so a debug
 // build (which replaces telemetry with diagnostics) is obvious at the AP.
 #if defined(DIAG_TELEMETRY)
-#define TAG_FW_VERSION  (0x8000 | 0x0014)
+#define TAG_FW_VERSION  (0x8000 | 0x0015)
 #else
-#define TAG_FW_VERSION  0x0014
+#define TAG_FW_VERSION  0x0015
 #endif
 
 // Capabilities
@@ -186,12 +186,21 @@ radio_state_t *oepl_radio_get_state(void);
 // Set wakeup reason for next checkin
 void oepl_radio_set_wakeup_reason(uint8_t reason);
 
-// One-shot crash report: the next AvailDataReq carries the fault PC and status
-// in fields the AP stores verbatim (see DEVELOPMENT.md "Reading a crash"):
-//   batteryMv   = PC[15:0]      temperature = PC[23:16]
-//   LQI         = UFSR[3:0]<<4 | BFSR[3:0]   (from CFSR)
+// One-shot crash report in the next AvailDataReq, in fields the AP stores
+// verbatim (tools/ap.py decodes them). The temperature byte carries a fault
+// class that no real temperature can have (-128..-97 C), so a report is
+// recognisable even though the AP resets wakeupReason within seconds:
+//   temperature = class, batteryMv = detail, LQI = why
+// FAULT_CLASS_HARDFAULT | (PC >> 16 & 3), | 4 if PC is in RAM:  detail = PC[15:0],
+//                                            why = UFSR[3:0] << 4 | BFSR[3:0]
+// FAULT_CLASS_DOORBELL: detail = 0x8000 | direct command id, or the command
+//                       struct's RAM offset;  why = phase << 6 | CMDSTA[5:0]
+// FAULT_CLASS_WATCHDOG: detail = 0, why = 0
 // Normal values resume on the following checkin.
-void oepl_radio_set_fault_report(uint32_t pc, uint32_t cfsr);
+#define FAULT_CLASS_HARDFAULT   0x80
+#define FAULT_CLASS_DOORBELL    0x90
+#define FAULT_CLASS_WATCHDOG    0x98
+void oepl_radio_set_fault_report(uint8_t fault_class, uint16_t detail, uint8_t why);
 
 #ifdef DIAG_TELEMETRY
 // Debug builds only (make DIAG=1): the next checkin reports the last image

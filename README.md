@@ -28,7 +28,7 @@ Custom open-source OEPL firmware for the Solum TG-GR6000N 6.0" BWR e-paper tag.
 - [x] SEGGER RTT debug output (512-byte buffer)
 - [x] UART TX debug output on DIO3 at 115200 baud
 
-**Firmware**: v0.20 — ~18KB flash, 13KB static RAM (see `PLAN.md` for history, `DEVELOPMENT.md` for the test loop)
+**Firmware**: v0.21 — ~18KB flash, 13KB static RAM (see `PLAN.md` for history, `DEVELOPMENT.md` for the test loop)
 
 ## Project Structure
 
@@ -156,7 +156,7 @@ the FTDI adapter used for cc2538-bsl flashing.
 - **DIO13 (BUSY)** always reads HIGH — likely FPC cable or hardware issue. Display refreshes work but BUSY polling runs to full timeout.
 - **Sleep current ~59 µA** (v0.20, measured) — down from ~2 mA; true CC2630 standby is ~1–2 µA, the rest is unexplained (see DEVELOPMENT.md).
 - **~100 s per image** — the AP delivers a full block on the first request only sometimes (~3 requests/block, AP-side). Attempts are cheap (burst idle-timeout) so this is a speed issue, not a reliability one.
-- **Low battery looks like firmware bugs** — below ~2.9 V the radio core can hang mid-download (reported as fault `DEAD0DB0`). Check the voltage on the splash first.
+- **RF core hangs about every 2 h** — the doorbell stops being acknowledged (fault `rf-doorbell`, usually on `CMD_ABORT`). The tag records a crash capture, resets and carries on, but each recovery redraws the splash. Under investigation; not battery-related (measured on a 3.0 V bench supply).
 - **UART debug mirror** off by default (`-DRTT_UART`); it never produced output on this board and kept the serial domain powered. Use RTT.
 
 ## Based On

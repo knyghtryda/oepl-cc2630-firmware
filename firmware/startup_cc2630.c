@@ -184,11 +184,24 @@ static void fault_reset(void)
 // battery tag is visible in the AP's tag DB without a debugger attached.
 __attribute__((section(".noinit"))) volatile struct fault_record g_fault;
 
-void HardFault_Handler(void)
+// The exception frame must be located before any C code runs: a normal C
+// handler pushes registers in its prologue, so reading MSP inside it points
+// below the frame and every "stacked" value is shifted (the fault reports
+// before this fix were garbage: PC 0, LR 0x11C). The naked entry picks MSP or
+// PSP from EXC_RETURN and hands the frame pointer to the C part in r0.
+static void hardfault_c(uint32_t *sp) __attribute__((used, noinline));
+
+__attribute__((naked)) void HardFault_Handler(void)
 {
-    // Read stacked registers from MSP
-    uint32_t *sp;
-    __asm volatile ("mrs %0, msp" : "=r" (sp));
+    __asm volatile ("tst lr, #4\n"
+                  "ite eq\n"
+                  "mrseq r0, msp\n"
+                  "mrsne r0, psp\n"
+                  "b hardfault_c\n");
+}
+
+static void hardfault_c(uint32_t *sp)
+{
 
     g_fault.pc   = sp[6];
     g_fault.lr   = sp[5];
@@ -196,6 +209,13 @@ void HardFault_Handler(void)
     g_fault.cfsr = *(volatile uint32_t *)0xE000ED28;
     g_fault.bfar = *(volatile uint32_t *)0xE000ED38;
     g_fault.magic = FAULT_MAGIC;
+    {
+        // stacked frame: r0 r1 r2 r3 r12 lr pc xpsr, then CFSR/HFSR/BFAR/MMFAR
+        const uint32_t regs[] = { sp[0], sp[1], sp[2], sp[3], sp[4], sp[5], sp[6], sp[7],
+                                  *(volatile uint32_t *)0xE000ED28, *(volatile uint32_t *)0xE000ED2C,
+                                  *(volatile uint32_t *)0xE000ED38, *(volatile uint32_t *)0xE000ED34 };
+        crash_capture(g_fault.pc, g_fault.lr, regs, sizeof(regs) / sizeof(regs[0]));
+    }
 
     rtt_puts("\r\n!!! HARDFAULT !!!\r\n");
     rtt_puts("PC="); rtt_put_hex32(g_fault.pc); rtt_puts("\r\n");

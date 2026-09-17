@@ -22,7 +22,8 @@ static radio_state_t radio_st;
 static uint8_t tx_frame[64];
 static uint8_t g_wakeup_reason = WAKEUP_REASON_FIRSTBOOT;
 static bool g_fault_pending;
-static uint32_t g_fault_pc, g_fault_cfsr;
+static uint8_t g_fault_class, g_fault_why;
+static uint16_t g_fault_detail;
 #ifdef DIAG_TELEMETRY
 static bool g_diag_pending;
 static uint8_t g_diag_lqi, g_diag_temp;
@@ -191,10 +192,9 @@ bool oepl_radio_checkin(struct AvailDataInfo *out_info)
     req->batteryMv = bat_mv;
     if (g_fault_pending) {
         // Crash report rides in the telemetry fields for this one checkin
-        req->batteryMv = (uint16_t)(g_fault_pc & 0xFFFF);
-        req->temperature = (int8_t)((g_fault_pc >> 16) & 0xFF);
-        req->lastPacketLQI = (uint8_t)((((g_fault_cfsr >> 16) & 0xF) << 4) |
-                                       ((g_fault_cfsr >> 8) & 0xF));
+        req->batteryMv = g_fault_detail;
+        req->temperature = (int8_t)g_fault_class;
+        req->lastPacketLQI = g_fault_why;
         g_fault_pending = false;
     }
 #ifdef DIAG_TELEMETRY
@@ -574,9 +574,10 @@ void oepl_radio_set_diag_report(uint8_t failed_blocks, uint8_t xfer,
 }
 #endif
 
-void oepl_radio_set_fault_report(uint32_t pc, uint32_t cfsr)
+void oepl_radio_set_fault_report(uint8_t fault_class, uint16_t detail, uint8_t why)
 {
-    g_fault_pc = pc;
-    g_fault_cfsr = cfsr;
+    g_fault_class = fault_class;
+    g_fault_detail = detail;
+    g_fault_why = why;
     g_fault_pending = true;
 }

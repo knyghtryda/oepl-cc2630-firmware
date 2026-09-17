@@ -138,7 +138,16 @@ def main():
         time.sleep(wait)
         power_on(p, mv)
     elif cmd == "hold":
-        power_on(p, int(sys.argv[3]) if len(sys.argv) > 3 else DEFAULT_MV)
+        mv = int(sys.argv[3]) if len(sys.argv) > 3 else DEFAULT_MV
+        power_on(p, mv)
+        # Confirm the output is really sourcing: the PPK2 re-enumerates after
+        # every session close, and a half-open session leaves the tag dark.
+        p.start_measuring()
+        s0 = read_samples(p, 1.0)[-5000:]
+        p.stop_measuring()
+        if not s0 or max(s0) < 20:          # a powered tag always draws > 20 uA at boot
+            sys.exit(f"hold: VOUT did not come up (max {max(s0) if s0 else 'no'} uA)")
+        print(f"hold: tag drawing, {sum(s0) / len(s0):.0f} uA avg over 1 s", file=sys.stderr)
         secs = float(sys.argv[2])
         try:
             time.sleep(secs)

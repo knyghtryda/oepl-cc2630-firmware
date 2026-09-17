@@ -123,13 +123,38 @@ to catch it. Pseudo-PCs: `0xDEAD0DB0` RF doorbell hang (radio core stopped
 answering — seen on a tag at 2.83 V), `0xDEADD006` watchdog (something spun
 for >90 s without kicking; deep sleep doesn't count, the WDT stops in standby).
 
-### When a tag misbehaves, check the battery first
+### Low battery is not the only cause of a radio hang
 
-The whole afternoon of 2026-09-13 was spent on failures that were a coin-cell
-set sagging from 3.16 V to 2.83 V: lost `XferComplete`, then a radio-core hang
-on every download. The splash shows the voltage; the AP shows it on every
-check-in. The AP also reboots now and then — `tools/ap_log.py` disconnecting,
-or a tag's DB record jumping back to an older state, is that.
+On 2026-09-13 a coin-cell set sagging from 3.16 V to 2.83 V coincided with a
+lost `XferComplete` and then a radio-core hang on every download, and the
+battery got the blame. **That was wrong**: the 14 h soak on 2026-09-16 hit the
+same doorbell hang 6 times on a steady 3.0 V bench supply, roughly every
+2.3 h. Low voltage may make it more likely; it is not the cause. Still check
+the voltage first (the splash and every check-in report it), but don't stop
+there.
+
+The AP also reboots now and then — `tools/ap_log.py` disconnecting, or a tag's
+DB record jumping back to an older state, is that.
+
+### Reading a crash capture
+
+A fault (HardFault, doorbell hang, watchdog) freezes the last ~1 KB of debug
+output plus the relevant registers into `.noinit` and resets the tag. The
+capture survives the reset but not a power cycle:
+
+```bash
+tools/crash_dump.py [out_prefix]     # J-Link; tag powered, e.g. tools/ppk.py hold 120
+```
+
+The next check-in also reports it: `tools/ap.py status` decodes
+`FAULT hardfault pc=… ufsr=… bfsr=…`, `FAULT rf-doorbell cmd=… phase=… cmdsta=…`
+or `FAULT watchdog`. The fault class rides in the temperature field as an
+impossible value (−128…−104 °C), because **the AP clears `wakeupReason` within
+seconds of the tag reporting it** — don't key tooling on `wake=0xfe`.
+
+Bench switches to exercise the paths (never ship): `BENCH_TEST_HARDFAULT`
+(bus fault at a known PC), `BENCH_TEST_DOORBELL_HANG` (gates the RF core clock,
+then aborts).
 
 ### RTT (needs J-Link attached)
 
@@ -143,7 +168,7 @@ Block download prints `Bnn` then `+` (42/42), `~` (41/42 accepted late), `R`
 where the `rf[]` counters come from the RF core (`nok` CRC errors, `ign`
 filtered, `full` dropped for lack of a free RX entry). A boot after a crash
 prints `LAST FAULT: PC=...` (PC `DEAD0DB0` = RF doorbell hang) and the first
-check-in shows `wakeupReason=254` in the AP DB.
+check-in carries the fault class/detail (see "Reading a crash capture").
 
 ## Weather display (Home Assistant)
 

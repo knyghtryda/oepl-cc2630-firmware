@@ -8,6 +8,10 @@
 #include "oepl_hw_abstraction_cc2630.h"
 #include "rtt.h"
 #include "fault.h"
+#include "hw_aon_rtc.h"
+#include "aon_rtc.h"
+#include "hw_prcm.h"
+#include "hw_aon_wuc.h"
 
 #include <string.h>
 
@@ -154,9 +158,11 @@ static void rf_wait_boot(void)
 static uint32_t rf_doorbell(uint32_t pOp)
 {
     volatile uint32_t i;
+    uint32_t phase = 1;                    // 1: CMDR never cleared, 2: no ACK
     for (i = 0; i < RF_DOORBELL_TIMEOUT_LOOPS; i++)
         if (HWREG(RFC_DBELL_BASE + RFC_DBELL_O_CMDR) == 0) break;
     if (i < RF_DOORBELL_TIMEOUT_LOOPS) {
+        phase = 2;
         RFCAckIntClear();
         HWREG(RFC_DBELL_BASE + RFC_DBELL_O_CMDR) = pOp;
         for (i = 0; i < RF_DOORBELL_TIMEOUT_LOOPS; i++)
@@ -168,9 +174,30 @@ static uint32_t rf_doorbell(uint32_t pOp)
     }
 
     rtt_puts("RF: doorbell hung, RESET\r\n");
+    {
+        const uint32_t regs[] = {
+            phase,
+            HWREG(RFC_DBELL_BASE + RFC_DBELL_O_CMDR),
+            HWREG(RFC_DBELL_BASE + RFC_DBELL_O_CMDSTA),
+            HWREG(RFC_DBELL_BASE + RFC_DBELL_O_RFHWIFG),
+            HWREG(RFC_DBELL_BASE + RFC_DBELL_O_RFCPEIFG),
+            HWREG(RFC_DBELL_BASE + RFC_DBELL_O_RFACKIFG),
+            HWREG(PRCM_BASE + PRCM_O_PDSTAT0),
+            HWREG(PRCM_BASE + PRCM_O_PDSTAT0RFC),
+            HWREG(PRCM_BASE + PRCM_O_RFCCLKG),
+            HWREG(AON_WUC_BASE + AON_WUC_O_PWRSTAT),
+            *(volatile uint16_t *)&rf_cmd_rx.status,
+            *(volatile uint16_t *)&rf_cmd_tx.status,
+            *(volatile uint16_t *)&rf_cmd_setup.status,
+            *(volatile uint16_t *)&rf_cmd_fs.status,
+            AONRTCSecGet(),
+            HWREG(AON_RTC_BASE + AON_RTC_O_SUBSEC),
+        };
+        crash_capture(FAULT_PC_RF_DOORBELL, pOp, regs, sizeof(regs) / sizeof(regs[0]));
+    }
     g_fault.pc   = FAULT_PC_RF_DOORBELL;
     g_fault.lr   = pOp;
-    g_fault.sp   = 0;
+    g_fault.sp   = phase;
     g_fault.cfsr = HWREG(RFC_DBELL_BASE + RFC_DBELL_O_CMDSTA);
     g_fault.bfar = HWREG(RFC_DBELL_BASE + RFC_DBELL_O_RFCPEIFG);
     g_fault.magic = FAULT_MAGIC;

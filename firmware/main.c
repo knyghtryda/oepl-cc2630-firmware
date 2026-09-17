@@ -33,6 +33,7 @@
 #include "interrupt.h"
 #include "hw_ints.h"
 #include "aon_ioc.h"
+#include "hw_rfc_pwr.h"
 #include "ioc.h"
 #include "gpio.h"
 #include "aux_wuc.h"
@@ -763,7 +764,21 @@ int main(void)
     // encoded in that one checkin's battery/temperature/LQI fields.
     if (had_fault) {
         oepl_radio_set_wakeup_reason(WAKEUP_REASON_WDT_RESET);
-        oepl_radio_set_fault_report(last_fault.pc, last_fault.cfsr);
+        if (last_fault.pc == FAULT_PC_RF_DOORBELL) {
+            uint32_t op = last_fault.lr;
+            uint16_t cmd = (op & 1) ? (uint16_t)(0x8000 | ((op >> 16) & 0x7FFF))
+                                    : (uint16_t)(op & 0x7FFF);
+            oepl_radio_set_fault_report(FAULT_CLASS_DOORBELL, cmd,
+                                        (uint8_t)((last_fault.sp & 3) << 6 | (last_fault.cfsr & 0x3F)));
+        } else if (last_fault.pc == FAULT_PC_WATCHDOG) {
+            oepl_radio_set_fault_report(FAULT_CLASS_WATCHDOG, 0, 0);
+        } else {
+            uint8_t cls = FAULT_CLASS_HARDFAULT | ((last_fault.pc >> 16) & 3) |
+                          (((last_fault.pc >> 28) == 2) ? 4 : 0);
+            oepl_radio_set_fault_report(cls, (uint16_t)(last_fault.pc & 0xFFFF),
+                                        (uint8_t)((((last_fault.cfsr >> 16) & 0xF) << 4) |
+                                                  ((last_fault.cfsr >> 8) & 0xF)));
+        }
     }
 
     // --- Main loop: periodic checkin + sleep ---
@@ -861,6 +876,24 @@ int main(void)
             rtt_puts(", back off\r\n");
         }
 
+#ifdef BENCH_TEST_HARDFAULT
+        // Bench: a real bus fault (RF core registers with the domain off) on the
+        // 3rd check-in, to verify the HardFault record against a known location
+        if (checkin_count == 2) {
+            rtt_puts("BENCH: forcing HardFault\r\n");
+            PRCMPowerDomainOff(PRCM_DOMAIN_RFCORE);
+            oepl_rf_rx_stop();
+        }
+#endif
+#ifdef BENCH_TEST_DOORBELL_HANG
+        // Bench: provoke a doorbell timeout (RF core powered off, then abort)
+        // on the 3rd check-in to exercise crash capture and the fault report.
+        if (checkin_count == 2) {
+            rtt_puts("BENCH: forcing doorbell hang\r\n");
+            HWREG(RFC_PWR_NONBUF_BASE + RFC_PWR_O_PWMCLKEN) = 0;   // RFCClockDisable(): CPE stops answering
+            oepl_rf_rx_stop();
+        }
+#endif
         enter_sleep(wait_sec);
 
         // After sleep, RF core was shut down — re-init before next checkin

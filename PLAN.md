@@ -92,7 +92,14 @@ Findings on the bench (Weather6, `00124B0018177B31`, RSSI −67, AP 192.168.5.4)
 - [x] Drain the AP burst before the next block request (download 119 → 75 s at −68 dBm).
 - [x] RF_CFG A/B (CPE patch, stock overrides, RFE patch): no difference at −68 dBm.
 - [x] Back-off on failed check-ins and updates (30 s doubling to 15 min), bench-tested with forced failures.
-- [~] Soak v0.20 on the bench tag (debugger detached), then OTA it to Weather6. Run 1 (2026-09-16
+- [x] Soak v0.20, 14 h: all 28 image pushes landed, but the RF doorbell hung 6 times
+      (~every 2.3 h) on a steady 3.0 V supply — each time recorded, reset and recovered.
+      **Weather6 stays on v0.18 until this is understood.**
+- [x] Crash capture (last ~1 KB of log + registers, frozen in .noinit) + tools/crash_dump.py;
+      fault reports carry a class marker the AP can't erase (v0.21). Verified with forced faults.
+- [x] HardFault record was garbage (review M8 — MSP read after the prologue). Naked entry;
+      verified: PC/LR now point at the forced fault site.
+- [ ] Find the RF doorbell hang: unattended repro run, capture the log + registers at the fault. Run 1 (2026-09-16
       17:00) caught every download failing on AP stalls → patience fix 6ce6be1; run 2 from 17:24.
 
 ## External review (2026-09-16)

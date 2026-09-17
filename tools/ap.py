@@ -76,10 +76,19 @@ def fmt(t):
     nxt_s = f"in {int(nxt - now)}s" if nxt and nxt < 3216153600 else "?"
     hsh = "ZERO" if t["hash"] == ZERO_HASH else t["hash"][:8]
     fault = ""
-    if t["wakeupReason"] == 0xFE:
-        # First checkin after a crash carries the fault record (see DEVELOPMENT.md)
-        pc = ((t["temperature"] & 0xFF) << 16) | (t["batteryMv"] & 0xFFFF)
-        fault = f" FAULT pc=0x{pc:06x} ufsr={t['LQI'] >> 4:x} bfsr={t['LQI'] & 0xF:x}"
+    temp8 = t["temperature"] & 0xFF
+    detail, why = t["batteryMv"] & 0xFFFF, t["LQI"]
+    fault = ""
+    if 0x80 <= temp8 <= 0x87:
+        pc = (0x20000000 if temp8 & 4 else 0) | ((temp8 & 3) << 16) | detail
+        fault = f" FAULT hardfault pc=0x{pc:08x} ufsr={why >> 4:x} bfsr={why & 0xF:x}"
+    elif temp8 == 0x90:
+        name = (f"direct 0x{detail & 0x7FFF:04x}" if detail & 0x8000 else f"struct @0x2000{detail:04x}")
+        fault = f" FAULT rf-doorbell cmd={name} phase={why >> 6} cmdsta=0x{why & 0x3F:02x}"
+    elif temp8 == 0x98:
+        fault = " FAULT watchdog"
+    elif temp8 == 0xAD and detail == 0x0DB0:
+        fault = " FAULT rf-doorbell (pre-v0.21 report)"
     if os.environ.get("OEPL_DIAG") and not fault:
         # DIAG=1 firmware: LQI/temperature/battery carry download diagnostics
         lqi, temp, bat = t["LQI"], t["temperature"] & 0xFF, t["batteryMv"]
