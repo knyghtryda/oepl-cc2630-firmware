@@ -313,6 +313,8 @@ static bool block_checksum_ok(const uint8_t *buf, uint32_t expected_len)
     return sum == bd->checksum;
 }
 
+#define BLOCK_EMPTY_LIMIT 6
+
 // Download a specific block into a buffer, with retries
 // Accumulates parts across attempts — missing parts requested on retry
 bool download_block(uint8_t block_id, struct AvailDataInfo *info,
@@ -332,7 +334,10 @@ bool download_block(uint8_t block_id, struct AvailDataInfo *info,
     for (uint8_t attempt = 0; attempt < 15; attempt++) {
         if (attempt > 0) {
             rtt_puts("R");
-            oepl_hw_delay_ms(100);
+            // After an empty response (no ACK, no parts) the AP is usually
+            // busy -- e.g. its ESP32 rendering another tag's content -- for
+            // seconds, not milliseconds: give it growing pauses.
+            oepl_hw_delay_ms(zero_count ? 500UL * zero_count : 100);
         }
         uint8_t got = oepl_radio_request_block(block_id, info->dataVer, info->dataType,
                                                 buf, parts_rcvd);
@@ -351,10 +356,12 @@ bool download_block(uint8_t block_id, struct AvailDataInfo *info,
             memset(parts_rcvd, 0, sizeof(parts_rcvd));
             continue;
         }
-        // If AP isn't responding at all (0 parts, 3 times), give up early
+        // If the AP isn't responding at all, give up after BLOCK_EMPTY_LIMIT
+        // empty responses in a row (~20 s of patience with the pauses above;
+        // 3 wasn't enough to ride out routine AP stalls on the bench)
         if (got == 0) {
             zero_count++;
-            if (zero_count >= 3) {
+            if (zero_count >= BLOCK_EMPTY_LIMIT) {
                 rtt_puts("X");
                 break;
             }
@@ -408,8 +415,9 @@ static void get_image_bytes(uint32_t offset, uint8_t *out, uint16_t len,
                              struct AvailDataInfo *info, bool is_red_plane)
 {
     while (len > 0) {
-        // If too many blocks have failed, AP has nothing — fill white and stop
-        if (dl_failed_blocks >= 3) {
+        // A failed block means the image won't be shown (see
+        // download_and_display): stop fetching the rest
+        if (dl_failed_blocks >= 1) {
             memset(out, 0x00, len);
             return;
         }
@@ -501,8 +509,9 @@ static bool download_and_display(struct AvailDataInfo *info)
     uint8_t row_4bpp[300];
 
     for (uint16_t y = 0; y < height; y++) {
-        // Abort early if AP clearly has nothing to serve
-        if (dl_failed_blocks >= 3) {
+        // Abort at the first failed block: a partial image is never refreshed,
+        // so downloading the rest would only burn radio time
+        if (dl_failed_blocks >= 1) {
             rtt_puts("\r\nABORT: AP not serving data\r\n");
             break;   // no refresh will follow (see below), so stop streaming
         }
