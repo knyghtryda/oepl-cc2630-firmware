@@ -127,6 +127,18 @@ LIBS = \
 OBJECTS = $(patsubst %.c,$(BUILD_DIR)/%.o,$(filter %.c,$(SOURCES)))
 OBJECTS += $(patsubst %.cpp,$(BUILD_DIR)/%.o,$(filter %.cpp,$(SOURCES)))
 
+# Rebuild correctly without `make clean`:
+# - header dependencies (-MMD -MP): editing a .h rebuilds what includes it
+# - a flags stamp: changing DEFINES on the command line (RF_CFG=, DIAG=,
+#   EXTRA_DEFINES=...) rebuilds everything instead of linking stale objects
+# - the link depends on the linker script and driverlib too
+DEPFLAGS = -MMD -MP
+DEPS = $(OBJECTS:.o=.d)
+FLAGS_STAMP = $(BUILD_DIR)/.flags
+FLAGS_NOW = $(CC) $(CFLAGS) $(CXXFLAGS) $(LDFLAGS)
+$(shell mkdir -p $(BUILD_DIR); \
+        echo '$(FLAGS_NOW)' | cmp -s - $(FLAGS_STAMP) || echo '$(FLAGS_NOW)' > $(FLAGS_STAMP))
+
 # Default target
 all: $(BIN_DIR)/$(PROJECT).bin size
 
@@ -139,19 +151,19 @@ $(BIN_DIR):
 	mkdir -p $(BIN_DIR)
 
 # Compile C files
-$(BUILD_DIR)/%.o: %.c | $(BUILD_DIR)
+$(BUILD_DIR)/%.o: %.c $(FLAGS_STAMP) | $(BUILD_DIR)
 	@echo "CC $<"
 	@mkdir -p $(dir $@)
-	@$(CC) $(CFLAGS) -c $< -o $@
+	@$(CC) $(CFLAGS) $(DEPFLAGS) -c $< -o $@
 
 # Compile C++ files
-$(BUILD_DIR)/%.o: %.cpp | $(BUILD_DIR)
+$(BUILD_DIR)/%.o: %.cpp $(FLAGS_STAMP) | $(BUILD_DIR)
 	@echo "CXX $<"
 	@mkdir -p $(dir $@)
-	@$(CXX) $(CXXFLAGS) -c $< -o $@
+	@$(CXX) $(CXXFLAGS) $(DEPFLAGS) -c $< -o $@
 
 # Link
-$(BUILD_DIR)/$(PROJECT).elf: $(OBJECTS)
+$(BUILD_DIR)/$(PROJECT).elf: $(OBJECTS) $(FIRMWARE_DIR)/cc2630f128.lds $(CC26X0_DRIVERLIB)/bin/gcc/driverlib.lib $(FLAGS_STAMP)
 	@echo "LD $@"
 	@$(CC) $(LDFLAGS) $(OBJECTS) $(LIBS) -o $@
 
@@ -238,5 +250,7 @@ help:
 	@echo "JTAG Debugging:"
 	@echo "  1. make debug-server   (in one terminal)"
 	@echo "  2. make debug          (in another terminal)"
+
+-include $(DEPS)
 
 .PHONY: all ota clean program jtag-flash debug-server debug size help
