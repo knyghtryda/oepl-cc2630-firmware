@@ -523,7 +523,7 @@ rf_status_t oepl_rf_rx_start(uint8_t ieee_channel, uint32_t timeout_us)
     rf_cmd_rx.condition.rule = COND_NEVER;
     rf_cmd_rx.channel = ieee_channel;  // 0 = keep current, 11-26 = IEEE channel
     rf_cmd_rx.rxConfig.bAutoFlushCrc = 1;
-    rf_cmd_rx.rxConfig.bAutoFlushIgn = 0;
+    rf_cmd_rx.rxConfig.bAutoFlushIgn = 1;   // drop frames the address filter rejects
     rf_cmd_rx.rxConfig.bIncludePhyHdr = 0;
     rf_cmd_rx.rxConfig.bIncludeCrc = 0;
     rf_cmd_rx.rxConfig.bAppendRssi = 1;
@@ -535,7 +535,10 @@ rf_status_t oepl_rf_rx_start(uint8_t ieee_channel, uint32_t timeout_us)
 
     // Enable frame filtering: accept only packets addressed to us or broadcast
     rf_cmd_rx.frameFiltOpt.frameFiltEn = 1;
-    rf_cmd_rx.frameFiltOpt.frameFiltStop = 0;   // Still receive full frame even if rejected (we flush)
+    // Rejected frames (e.g. the AP's parts for another tag) are flushed by the
+    // RF core: previously they reached the queue, and a part for another tag
+    // with the same block id would have been accepted as ours.
+    rf_cmd_rx.frameFiltOpt.frameFiltStop = 0;
     rf_cmd_rx.frameFiltOpt.autoAckEn = 0;
     rf_cmd_rx.frameFiltOpt.maxFrameVersion = 1; // Accept 802.15.4-2003 and -2006
     rf_cmd_rx.localExtAddr = local_ext_addr;

@@ -269,6 +269,11 @@ bool oepl_radio_checkin(struct AvailDataInfo *out_info)
                 struct AvailDataInfo *info = (struct AvailDataInfo *)&pkt[sizeof(struct MacFrameNormal) + 1];
                 if (check_crc(info, sizeof(struct AvailDataInfo))) {
                     memcpy(out_info, info, sizeof(struct AvailDataInfo));
+                    // Learn the AP's address from its reply. After a failed
+                    // scan the direct check-in path has only a broadcast
+                    // placeholder, and block requests / XferComplete are
+                    // unicast to ap_mac.
+                    memcpy(radio_st.ap_mac, ((struct MacFrameNormal *)pkt)->src, 8);
                     radio_st.last_rssi = rssi;
                     oepl_rf_rx_stop();
                     oepl_rf_rx_flush();

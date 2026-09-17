@@ -116,10 +116,10 @@ PRs #5–#7 (spectrumjade, 2026-08-16) and PeitzGreene's fork with REVIEW-FINDIN
 Most findings were already fixed and measured in v0.19/v0.20; PRs are superseded.
 
 - [x] Closed PRs #5–#7 with thank-you comments pointing at the superseding commits (2026-09-16)
-- [~] M17: learn the AP address from AvailDataInfo (direct check-in fallback unicast to FF:FF…)
-      — coded; bench test with BENCH_FORCE_SCAN_FAIL, with and without the fix
-- [~] H10: RF core flushes frames rejected by the address filter (bAutoFlushIgn=1) — coded;
-      bench test: download over RTT, ign counts, burst yield vs 339fea1-era numbers
+- [x] M17: learn the AP address from AvailDataInfo. A/B on the bench with BENCH_FORCE_SCAN_FAIL:
+      without it 12 requests / 12 unanswered / download fails; with it DATA OK, 89.7% burst yield.
+- [x] H10: RF core flushes frames rejected by the address filter (bAutoFlushIgn=1); downloads
+      unaffected (89.7% yield in the same run).
 - [x] H1/M2: Makefile header deps, flags stamp, link deps — verified (no-op, header touch, flag change)
 - [ ] OTA robustness (H8, M14, M15, L19–L22): check apply status, write "applied" marker after
       verified apply, RF off during apply, verify through non-cached flash reads. Own task, J-Link

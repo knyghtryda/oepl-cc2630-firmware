@@ -273,6 +273,9 @@ static bool do_scan_and_checkin(struct AvailDataInfo *info)
     // Scan for AP
     rtt_puts("\r\n--- SCAN ---\r\n");
     int8_t ch = oepl_radio_scan_channels();
+#ifdef BENCH_FORCE_SCAN_FAIL
+    ch = -1;   // bench: exercise the direct check-in fallback
+#endif
     if (ch < 0) {
         // Try direct checkin on all channels as fallback
         rtt_puts("Direct checkin...\r\n");
