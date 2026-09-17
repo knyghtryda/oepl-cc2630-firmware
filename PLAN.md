@@ -92,7 +92,24 @@ Findings on the bench (Weather6, `00124B0018177B31`, RSSI −67, AP 192.168.5.4)
 - [x] Drain the AP burst before the next block request (download 119 → 75 s at −68 dBm).
 - [x] RF_CFG A/B (CPE patch, stock overrides, RFE patch): no difference at −68 dBm.
 - [x] Back-off on failed check-ins and updates (30 s doubling to 15 min), bench-tested with forced failures.
-- [ ] Soak v0.20 on the bench tag (debugger detached), then OTA it to Weather6.
+- [~] Soak v0.20 on the bench tag (debugger detached), then OTA it to Weather6. Run 1 (2026-09-16
+      17:00) caught every download failing on AP stalls → patience fix 6ce6be1; run 2 from 17:24.
+
+## External review (2026-09-16)
+
+PRs #5–#7 (spectrumjade, 2026-08-16) and PeitzGreene's fork with REVIEW-FINDINGS.md (65 findings).
+Most findings were already fixed and measured in v0.19/v0.20; PRs are superseded.
+
+- [x] Closed PRs #5–#7 with thank-you comments pointing at the superseding commits (2026-09-16)
+- [~] M17: learn the AP address from AvailDataInfo (direct check-in fallback unicast to FF:FF…)
+      — coded; bench test with BENCH_FORCE_SCAN_FAIL, with and without the fix
+- [~] H10: RF core flushes frames rejected by the address filter (bAutoFlushIgn=1) — coded;
+      bench test: download over RTT, ign counts, burst yield vs 339fea1-era numbers
+- [x] H1/M2: Makefile header deps, flags stamp, link deps — verified (no-op, header touch, flag change)
+- [ ] OTA robustness (H8, M14, M15, L19–L22): check apply status, write "applied" marker after
+      verified apply, RF off during apply, verify through non-cached flash reads. Own task, J-Link
+      as safety net.
+- [ ] M21: OEPL channel 27 isn't valid for CMD_IEEE_RX (only matters on an AP set to 27)
 - [ ] Radio configs at the real edge (−77 dBm or worse) if a spot like that is available.
 - [ ] Identify the remaining ~59 µA from the board photo.
 
