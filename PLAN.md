@@ -107,7 +107,10 @@ Findings on the bench (Weather6, `00124B0018177B31`, RSSI −67, AP 192.168.5.4)
       doorbell no longer resets the tag -- the RF core is powered off before sleep and
       re-initialised on the next wake, and the event is reported to the AP.
       This also explains Weather6's boot loop on weak batteries: missed PONG -> channel 27.
-- [ ] Confirm over a long run that the hang is gone (16 h hunt on v0.22). Run 1 (2026-09-16
+- [x] Confirmed on v0.23, 16 h unattended (2026-09-17 12:58 → 09-18 04:58): **0 radio hangs**
+      (v0.20 had 6 in 14 h), 32/32 pushed images displayed, typically 2.5–3 min each,
+      1133 check-ins with no unexplained gaps.
+- [~] Weather6 updated from v0.18 to v0.23 over the air (2026-09-18). Run 1 (2026-09-16
       17:00) caught every download failing on AP stalls → patience fix 6ce6be1; run 2 from 17:24.
 
 ## External review (2026-09-16)
@@ -127,6 +130,16 @@ Most findings were already fixed and measured in v0.19/v0.20; PRs are superseded
 - [ ] M21: OEPL channel 27 isn't valid for CMD_IEEE_RX (only matters on an AP set to 27)
 - [ ] Radio configs at the real edge (−77 dBm or worse) if a spot like that is available.
 - [ ] Identify the remaining ~59 µA from the board photo.
+
+## Next
+
+- [ ] OTA robustness (H8, M14, M15, L19–L22): check flash erase/program status during apply,
+      write the "applied" marker only after a verified apply, power the RF core down first,
+      verify through non-cached reads. Bench tag + J-Link as the safety net.
+- [ ] The remaining ~59 µA of sleep current: sweep unused pins (pull-down/pull-up/hi-Z) to find
+      a load with an enable pin; the board photos narrowed the suspects to the IC by the left
+      antenna strip and the cluster wired to the top-edge contacts.
+- [ ] Re-measure battery budget on v0.23 (sleep floor, per-update charge) and update DEVELOPMENT.md.
 
 ## Follow-ups (not blocking)
 

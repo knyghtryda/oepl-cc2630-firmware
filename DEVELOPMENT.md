@@ -123,6 +123,16 @@ to catch it. Pseudo-PCs: `0xDEAD0DB0` RF doorbell hang (radio core stopped
 answering — seen on a tag at 2.83 V), `0xDEADD006` watchdog (something spun
 for >90 s without kicking; deep sleep doesn't count, the WDT stops in standby).
 
+### The channel-27 trap (fixed in v0.22)
+
+A scan that reached OEPL channel 27 handed `CMD_IEEE_RX` an illegal channel
+(11–26 only on this chip): the CPE raised INTERNAL_ERROR and stopped
+acknowledging the doorbell, including the `CMD_ABORT` sent to clean up, and
+the tag reset itself. It only happened when the AP's reply was missed on the
+earlier channels, so it looked random — ~1 per 2.3 h in a 14 h soak, and it
+was behind Weather6's boot loop on weak batteries. A 16 h run on v0.23 saw
+zero. Don't set an AP to channel 27 for these tags.
+
 ### Low battery is not the only cause of a radio hang
 
 On 2026-09-13 a coin-cell set sagging from 3.16 V to 2.83 V coincided with a
