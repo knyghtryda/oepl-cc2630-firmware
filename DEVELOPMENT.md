@@ -240,6 +240,19 @@ push to the tag to judge it on the panel, then `install`. Needs
 
 ## Power (measured on the bench, 2026-09-16)
 
+**Sleep floor, 2026-09-18: 59.8 µA → 39.3 µA.** The panel's control lines
+(BUSY, RST, DC, BS, CS) are pulled up during sleep instead of being left
+floating; an undefined level on the panel side was costing 20 µA. The shared
+SPI bus (MOSI/MISO/CLK/DIR) must stay high-impedance — pulling it up keeps
+something on that bus alive and the tag never settles (>500 µA). Found with
+`EXTRA_DEFINES="-DDIAG_PIN_MODE=n -DDIAG_PIN_MASK=0x..."` on a
+`DIAG_SLEEP_ONLY=1` build (mode 1 = pull down, 2 = pull up, 3/4 = driven
+low/high), then confirmed in the production firmware with
+`-DEPD_OFF_PULLUP_MASK=...`. Verified the panel still comes back:
+`EXTRA_DEFINES=-DBENCH_SPLASH_LOOP` refreshes, sleeps and refreshes again —
+three clean refreshes with the pull-ups in place.
+
+
 Bench tag `00124B00181880B0` "OEPL-DEBUG" powered by a Nordic PPK2 at 3.0 V,
 debugger detached, power-cycled after flashing (a JTAG connection keeps the
 CC26xx debug domain on until power is cut, which blocks standby — any reading

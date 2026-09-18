@@ -805,6 +805,20 @@ int main(void)
         rtt_puts("WARM BOOT: skipping splash\r\n");
     }
 
+#ifdef BENCH_SPLASH_LOOP
+    // Bench: refresh the panel, sleep, refresh again. Checks that the state
+    // the pins are left in during standby still lets the panel come back.
+    for (int bi = 0; bi < 3; bi++) {
+        enter_sleep(20);
+        int8_t bt; uint16_t bv;
+        oepl_hw_get_temperature(&bt);
+        oepl_hw_get_voltage(&bv);
+        rtt_puts("BENCH: refresh after sleep\r\n");
+        splash_display(mac, bv, bt, true, 11, NULL);
+        rtt_puts("BENCH: refresh done\r\n");
+    }
+#endif
+
     // Tell the AP the first checkin after a crash is a fault reset (0xFE);
     // it shows up as wakeupReason in the AP tag DB, with the fault PC/status
     // encoded in that one checkin's battery/temperature/LQI fields.
