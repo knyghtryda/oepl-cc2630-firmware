@@ -16,7 +16,9 @@
 // part-way through is bricked, and one that waits keeps its staged image and
 // retries on a later check-in. Measured idle on fresh CR2450s: ~3000 mV;
 // the display refresh already fails well before this.
+#ifndef OTA_APPLY_MIN_MV
 #define OTA_APPLY_MIN_MV    2400
+#endif
 
 // Sector 30 (0x1E000) stores the last applied OTA dataVer to prevent
 // re-downloading the same firmware if the AP re-offers it.

@@ -147,6 +147,12 @@ Most findings were already fixed and measured in v0.19/v0.20; PRs are superseded
       on the new image: without the readback+retry that sector would have stayed erased, i.e. a
       brick. Bench gotcha found and documented: a running `JLinkGDBServer` halts the tag on any
       reset it performs itself, so reset paths must be tested with the server killed.
+- [x] **A failed transfer no longer silences the tag** (2026-09-18, v0.25). Found while
+      bench-testing rejected OTA images: the update back-off was applied to the sleep
+      interval, so a tag offered a broken image stopped checking in for up to 15 minutes and
+      looked dead. The back-off now gates the transfer only. A/B on the bench with a
+      bad-vector image queued: before, silence for 15+ min; after, 14 consecutive check-ins
+      over 10 min with no re-download (`tools/ap_log.py` shows no block requests).
 - [ ] The remaining ~59 µA of sleep current: sweep unused pins (pull-down/pull-up/hi-Z) to find
       a load with an enable pin; the board photos narrowed the suspects to the IC by the left
       antenna strip and the cluster wired to the top-edge contacts.

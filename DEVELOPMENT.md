@@ -335,6 +335,20 @@ Don't trust gdb's `load` + `compare-sections` on this chip: when the halt
 lands in standby, programming silently fails and the comparison is answered
 from J-Link's flash cache. `tools/jflash.sh` resets first and reads back.
 
+**A failed transfer backs off the transfer, not the check-in** (v0.25 on). A
+tag that keeps failing the same download used to skip check-ins with it, for up
+to `RETRY_MAX_S` (15 min), which is indistinguishable from a dead tag at the
+AP. Now the tag keeps the AP's cadence and refuses only to *start* a transfer
+until the hold expires (`Transfer held Ns more after xN failures` over RTT).
+A different `dataVer` — the AP offering a replacement — cuts the hold to one
+check-in rather than clearing it, because an AP with several transfers queued
+offers a different dataVer every time and clearing outright turns that into a
+continuous download loop (measured on the bench).
+
+When nothing is pending the cadence is the AP's `maxsleep` (15 min here), so a
+quarter-hour of silence from a healthy tag is normal; a tag with data pending
+should be seen every 30–60 s.
+
 Check-in cadence is the AP's: `min(minutes until the content's TTL, maxsleep)`,
 sent only if > 1 min and only when `stopsleep=0` or no web UI is connected.
 HA `drawcustom` defaults `ttl` to 60 s → 1-minute check-ins. The AP is set to

@@ -848,6 +848,8 @@ int main(void)
     // stays inside the AP's 20-minute window for pending data.
     uint32_t checkin_count = 0;
     uint8_t checkin_fail_streak = 0;
+    uint32_t xfer_hold_until = 0;      // AON RTC second to allow transfers again
+    uint64_t xfer_hold_ver = 0;        // the dataVer that earned the hold
     uint8_t xfer_fail_streak = 0;
     while (1) {
         rtt_puts("\r\n=== Checkin #");
@@ -888,7 +890,33 @@ int main(void)
 
             bool xfer_failed = false;
             bool xfer_done = false;   // only a completed update clears the failure streak
-            if (info.dataType == DATATYPE_FW_UPDATE) {
+            // After a failed transfer the *transfer* backs off, not the
+            // check-in: a tag that stops checking in looks dead to the AP for
+            // up to RETRY_MAX_S, and an image the tag keeps rejecting would
+            // otherwise cost a 21 KB download every minute. So keep the AP's
+            // cadence and just refuse to start a new transfer until the hold
+            // expires. AON RTC seconds survive standby.
+            // A different dataVer means the AP is offering something new —
+            // most likely the fix for whatever was failing — so it gets a
+            // fresh attempt rather than inheriting the old hold. Not a free
+            // one, though: an AP with several transfers queued offers a
+            // different dataVer every check-in, and clearing the hold outright
+            // turns that into a continuous download loop (seen on the bench).
+            // Shrink the hold to one check-in instead of dropping it.
+            if (xfer_hold_until && info.dataVer != xfer_hold_ver) {
+                xfer_fail_streak = 0;
+                uint32_t floor = AONRTCSecGet() + RETRY_MIN_S;
+                if (xfer_hold_until > floor) xfer_hold_until = floor;
+            }
+            bool xfer_held = xfer_hold_until && (AONRTCSecGet() < xfer_hold_until);
+            if (xfer_held && info.dataType != DATATYPE_NOUPDATE) {
+                rtt_puts("Transfer held ");
+                rtt_put_hex32(xfer_hold_until - AONRTCSecGet());
+                rtt_puts("s more after x");
+                rtt_put_hex8(xfer_fail_streak);
+                rtt_puts(" failures\r\n");
+                oepl_radio_set_wakeup_reason(WAKEUP_REASON_TIMED);
+            } else if (info.dataType == DATATYPE_FW_UPDATE) {
                 if (oepl_ota_already_applied(info.dataVer)) {
                     rtt_puts("OTA: already applied, sending XferComplete\r\n");
                     oepl_radio_send_xfer_complete();
@@ -926,15 +954,18 @@ int main(void)
 
             if (xfer_failed) {
                 if (xfer_fail_streak < 8) xfer_fail_streak++;
-                uint32_t b = retry_backoff_s(xfer_fail_streak);
-                if (b > wait_sec) wait_sec = b;
+                xfer_hold_until = AONRTCSecGet() + retry_backoff_s(xfer_fail_streak);
+                xfer_hold_ver = info.dataVer;
                 rtt_puts("Update failed x");
                 rtt_put_hex8(xfer_fail_streak);
-                rtt_puts(", back off\r\n");
+                rtt_puts(", holding transfers ");
+                rtt_put_hex32(retry_backoff_s(xfer_fail_streak));
+                rtt_puts("s\r\n");
             } else if (xfer_done) {
                 // (A "no pending data" check-in doesn't reset it: the AP can
                 // flap between offering and not offering the same image.)
                 xfer_fail_streak = 0;
+                xfer_hold_until = 0;
             }
         } else {
             wait_sec = retry_backoff_s(checkin_fail_streak);
