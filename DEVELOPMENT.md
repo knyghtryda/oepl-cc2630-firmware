@@ -406,6 +406,15 @@ When nothing is pending the cadence is the AP's `maxsleep` (15 min here), so a
 quarter-hour of silence from a healthy tag is normal; a tag with data pending
 should be seen every 30–60 s.
 
+**Queueing an OTA makes the tag sleep for an hour.** `contentmode 5` sets
+`taginfo->nextupdate = 3216153600` on the AP (contentmanager.cpp), so the
+`nextCheckIn` it hands out is enormous and the tag sleeps its 3600 s cap. If
+the tag misses the offer — because it was mid-cycle when the OTA was queued —
+it goes quiet for a full hour before trying again, which looks exactly like a
+dead tag. Queue OTAs when the tag is awake and checking in every 30–60 s, and
+don't panic before the hour is up (seen on Weather6, 2026-09-18: silent
+13:33→14:35, then fine).
+
 Check-in cadence is the AP's: `min(minutes until the content's TTL, maxsleep)`,
 sent only if > 1 min and only when `stopsleep=0` or no web UI is connected.
 HA `drawcustom` defaults `ttl` to 60 s → 1-minute check-ins. The AP is set to
