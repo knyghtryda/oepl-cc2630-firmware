@@ -161,13 +161,18 @@ Most findings were already fixed and measured in v0.19/v0.20; PRs are superseded
       ~1 µA) and has no firmware control found so far.
 - [x] **Battery budget re-measured** (2026-09-18, v0.26): see DEVELOPMENT.md. 4.17 mAh/day for
       the weather tag's cadence → ≈450 days on 4x CR2450, up from ≈410.
-- [ ] **Compressed images (dataType 0x30) are not decoded.** The AP offers them (seen on every
-      `tools/ap.py image` push on 2026-09-18); the tag reads them as raw, runs off the end of the
-      data and fails block 1's checksum forever, so the image never displays. Pre-existing —
-      firmware from before this week's changes fails identically. It matters for battery life as
-      much as for function: the raw download is 77% of the daily budget and a compressed image of
-      the same content is ~15x smaller. Next: identify the AP's exact format (G5/zlib) and whether
-      the `capabilities` field in AvailDataReq can ask for raw as a stopgap.
+- [ ] **Decode zlib images (dataType 0x30).** Root cause found 2026-09-18: the AP compresses
+      by *reported version*, not by the capabilities field —
+      `tagtypes/35.json: "zlib_compression": "27"` (hex, 39) and
+      `contentmanager.cpp: taginfo->tagSoftwareVersion >= hwdata.zlib`. Every version bump past
+      38 silently kills images on every tag of this type; the firmware reads the compressed blob
+      as raw and fails the next block's checksum forever. Worked around by capping
+      TAG_FW_VERSION at 0x26 (38) — see the warning in oepl_radio_cc2630.h.
+      Worth doing properly: the weather image is 5.8 KB compressed against 33.6 KB raw, and the
+      raw download is 77% of the daily battery budget, so inflating it would roughly triple
+      battery life. Open question: the tag has 20 KB of RAM total, so a standard 32 KB inflate
+      window is out — check what window the AP's zlib uses (`makeimage.cpp`) and whether a
+      streaming inflate with a small window fits.
 
 ## Follow-ups (not blocking)
 

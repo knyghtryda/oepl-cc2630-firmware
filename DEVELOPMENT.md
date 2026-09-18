@@ -26,6 +26,21 @@ with bit 15 set (32783 for v0.15). Never ship it — it replaces real telemetry.
 
 ## Version bumps
 
+**Never report a version above 38 (0x26).** The AP decides whether to compress
+an image from the tag's *reported version*, not from the `capabilities` field:
+`http://192.168.5.4/tagtypes/35.json` carries `"zlib_compression": "27"`, read
+as hex (39), and `contentmanager.cpp` does
+`if (hwdata.zlib != 0 && taginfo->tagSoftwareVersion >= hwdata.zlib)`. A tag
+that reports 39 or more is served `DATATYPE_IMG_ZLIB` (0x30); this firmware
+reads it as raw, runs past the end of the data and fails the next block's
+checksum forever, so **no image ever displays again** — with no error anywhere
+except the tag's RTT log. Cost half an hour on 2026-09-18, on both tags at
+once, after a day of bumping the version for OTA tests.
+
+Until the tag can inflate zlib, keep bumps inside 0x18–0x26 and identify
+builds by the git commit, not the wire version.
+
+
 Two places, keep them in sync:
 
 - `firmware/oepl_radio_cc2630.h` — `TAG_FW_VERSION` (what the AP shows as `ver`)

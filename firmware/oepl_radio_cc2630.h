@@ -63,10 +63,17 @@
 // Firmware version as reported to the AP (`ver` in its tag DB). Keep in step
 // with the "FW vX.Y" string in splash.c. DIAG builds set bit 15 so a debug
 // build (which replaces telemetry with diagnostics) is obvious at the AP.
+//
+// *** CEILING: 38 (0x26) until this firmware can decode zlib images. ***
+// The AP compresses by version threshold, not by the capabilities field: for
+// hwType 0x35 its tagtypes/35.json says "zlib_compression": "27", read as
+// hex, so a tag reporting 39 or more is served DATATYPE_IMG_ZLIB (0x30). This
+// firmware reads those as raw, runs off the end of the data and never
+// displays them. Bumping past 38 silently stops every image from working.
 #if defined(DIAG_TELEMETRY)
-#define TAG_FW_VERSION  (0x8000 | 0x002B)
+#define TAG_FW_VERSION  (0x8000 | 0x0026)
 #else
-#define TAG_FW_VERSION  0x002B
+#define TAG_FW_VERSION  0x0026
 #endif
 
 // Capabilities
