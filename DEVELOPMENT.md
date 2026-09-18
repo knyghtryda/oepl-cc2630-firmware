@@ -52,6 +52,46 @@ it to the active area from a RAM-resident function, and resets. OTA block
 download is strict (all 42 parts, 20 retries, no early bail-out) so it works
 even from firmware whose image path is broken.
 
+What the apply guarantees (v0.24 on; the whole path is one-way once the first
+sector is erased, so every check happens before that point):
+
+- **Won't start weak.** Below `OTA_APPLY_MIN_MV` (2400 mV) the tag skips the
+  download entirely, and re-checks just before the apply in case the supply
+  sagged during it. The AP re-offers while the versions differ, so waiting
+  costs nothing.
+- **Won't jump into a bad image.** The staged reset vector must have the Thumb
+  bit set and point inside the staged image; the initial SP must be in SRAM.
+  A vector with bit 0 clear used to pass and would HardFault before the first
+  instruction of the new image.
+- **Reads its own writes.** Flash readbacks (staging and active) run with the
+  VIMS cache invalidated, otherwise they compare against cached bytes of the
+  image being replaced.
+- **Retries a bad sector.** Each active sector is erased, programmed and read
+  back, up to 5 times; the RAM buffer still holds the data, so a retry is free.
+- **Marks "applied" last.** The dataVer record (sector 30) is written from the
+  RAM function after the copy verifies, not before the copy starts — an
+  interrupted apply is retried instead of being skipped forever.
+- **Radio off first.** `oepl_rf_shutdown()` runs before the erase, so the flash
+  charge pump doesn't share the supply with the RF core.
+
+The first boot of the new image prints what the copy did:
+
+```
+OTA apply: sectors=06 retries=00 bad=00
+```
+
+(`retries` = erase/program attempts beyond the first, `bad` = sectors that
+never read back correctly.) The same three numbers ride to the AP in that first
+check-in — `tools/ap.py status` shows `OTA-APPLIED sectors=6 retries=0
+unverified=0` — which is the only way to see inside an apply on a sealed tag.
+They live in the dataVer record in sector 30, not in RAM: `.noinit` addresses
+move between builds, and this record has to be read by the *next* image.
+`x/4xw 0x1E000` over J-Link shows it long after the fact (`4F544156` magic,
+dataVer, then sectors/retries/bad/reported).
+
+Bench switch `EXTRA_DEFINES=-DBENCH_OTA_FLAKY_APPLY` makes the first attempt at
+sector 0 skip its program step, so the retry path runs for real.
+
 Only the AP at `http://192.168.5.4` is assumed; set `OEPL_AP` to override.
 
 ### J-Link (cJTAG, pins 24/25) — bring-up or recovery
@@ -277,6 +317,19 @@ Test switches (bench only): `EXTRA_DEFINES="-DBENCH_FORCE_CHECKIN_FAIL -DRETRY_M
 `make DIAG_SLEEP_ONLY=1` builds a firmware that does nothing but standby in a
 loop (no radio, no display) and snapshots the power registers into `.noinit`
 before each sleep — for separating MCU problems from board problems.
+
+**A running `JLinkGDBServer` stops the tag on any reset it performs itself.**
+An OTA apply, a watchdog bite or a fault reset leaves the core halted in ROM
+(PC ≈ 0x10003982, ~2.9 mA, silent on the AP) until the server is restarted or
+the tag is power-cycled. Test anything that resets — OTA applies above all —
+with the server killed, and read `.noinit` (crash ring, `g_ota_apply`)
+afterwards instead of watching RTT live.
+
+**A short power gap doesn't reset the tag.** The board's capacitors carry it
+through a few seconds in standby (~60 µA), so `off; sleep 3; on` resumes the
+old sleep instead of booting. Leave it off for 15 s or more. Note too that
+`tools/ppk.py hold` is what holds VOUT up: killing the shell that launched it
+leaves the python child (and the power) running — kill the child by PID.
 
 Don't trust gdb's `load` + `compare-sections` on this chip: when the halt
 lands in standby, programming silently fails and the comparison is answered

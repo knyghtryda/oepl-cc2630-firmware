@@ -29,8 +29,12 @@ tools/jflash.sh > "$OUT/flash.txt" 2>&1
 grep -q "flashed" "$OUT/flash.txt" || { cat "$OUT/flash.txt"; kill $HOLD; exit 1; }
 pkill -f '^JLinkGDBServer' || true
 kill $HOLD 2>/dev/null || true
+# ppk.py holds VOUT from a child process; kill that too or power never drops
+pgrep -f '^python3 tools/ppk[.]py hold' | xargs -r kill 2>/dev/null || true
 wait $HOLD 2>/dev/null || true
-sleep 3
+# 15 s, not 3: the board's capacitors carry the tag through a few seconds in
+# standby, and it then resumes the old sleep instead of booting
+sleep 15
 
 tools/ppk.py measure "$MEAS" "$OUT/trace.csv" --stats-every 5 > "$OUT/live.txt" 2>&1
 tools/ppk_analyze.py "$OUT/trace.csv" --from "$SETTLE" | tee "$OUT/summary.txt" | head -5

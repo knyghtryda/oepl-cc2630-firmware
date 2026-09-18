@@ -672,11 +672,36 @@ int main(void)
     // supply) held low and DIO11 (SPI flash CS) held high, no radio, no
     // display -- just standby in a loop. The
     // PPK2 reading is then the MCU + board floor with nothing driven.
+    // Pin sweep for hunting the board's sleep floor: DIAG_PIN_MODE picks what
+    // the pins in DIAG_PIN_MASK get instead of hi-Z (0 = none/hi-Z, 1 = pull
+    // down, 2 = pull up, 3 = driven low, 4 = driven high). A load fed through
+    // a pin shows up as a step in the standby current for the group that
+    // feeds it. Defaults reproduce the plain hi-Z build.
+#ifndef DIAG_PIN_MODE
+#define DIAG_PIN_MODE 0
+#endif
+#ifndef DIAG_PIN_MASK
+#define DIAG_PIN_MASK 0xFFFFFFFFu
+#endif
     for (uint8_t dio = 0; dio <= 30; dio++) {
         if (dio == 5 || dio == 11) continue;
+        bool swept = (DIAG_PIN_MODE != 0) && ((DIAG_PIN_MASK >> dio) & 1);
+        if (swept && DIAG_PIN_MODE >= 3) {
+            IOCPinTypeGpioOutput(dio);
+            GPIO_setOutputEnableDio(dio, GPIO_OUTPUT_ENABLE);
+            if (DIAG_PIN_MODE == 3) GPIO_clearDio(dio); else GPIO_setDio(dio);
+            continue;
+        }
+        uint32_t pull = IOC_NO_IOPULL;
+        if (swept) pull = (DIAG_PIN_MODE == 1) ? IOC_IOPULL_DOWN : IOC_IOPULL_UP;
         GPIO_setOutputEnableDio(dio, GPIO_OUTPUT_DISABLE);
-        IOCPortConfigureSet(dio, IOC_PORT_GPIO, IOC_NO_IOPULL | IOC_INPUT_DISABLE);
+        IOCPortConfigureSet(dio, IOC_PORT_GPIO, pull | IOC_INPUT_DISABLE);
     }
+    rtt_puts("PIN SWEEP mode=");
+    rtt_put_hex8(DIAG_PIN_MODE);
+    rtt_puts(" mask=");
+    rtt_put_hex32(DIAG_PIN_MASK);
+    rtt_puts("\r\n");
     IOCPinTypeGpioOutput(5);
     GPIO_setOutputEnableDio(5, GPIO_OUTPUT_ENABLE);
     GPIO_clearDio(5);   // panel supply off (high = on: +160 uA measured)
@@ -692,6 +717,20 @@ int main(void)
     rtt_puts("DIAG_SLEEP_ONLY\r\n");
     while (1) enter_sleep(20);
 #endif
+
+    // Report the last OTA apply (written from RAM by apply_ota, read here on
+    // the first boot of the image it installed)
+    struct ota_apply_stat ota_stat = {0};
+    bool ota_applied = oepl_ota_take_apply_report(&ota_stat);
+    if (ota_applied) {
+        rtt_puts("OTA apply: sectors=");
+        rtt_put_hex8(ota_stat.sectors);
+        rtt_puts(" retries=");
+        rtt_put_hex8(ota_stat.retries);
+        rtt_puts(" bad=");
+        rtt_put_hex8(ota_stat.bad);
+        rtt_puts("\r\n");
+    }
 
     // Report a HardFault from the previous run (record written by the handler)
     bool had_fault = fault_record_valid(&g_fault);
@@ -786,6 +825,15 @@ int main(void)
                                         (uint8_t)((((last_fault.cfsr >> 16) & 0xF) << 4) |
                                                   ((last_fault.cfsr >> 8) & 0xF)));
         }
+    }
+
+    // A tag in standby can't be probed over JTAG, so how the apply went rides
+    // to the AP in the first check-in after it, on the same telemetry channel
+    // as a fault report (a real fault takes precedence).
+    if (ota_applied && !had_fault) {
+        oepl_radio_set_fault_report(FAULT_CLASS_OTA_APPLY,
+                                    (uint16_t)(ota_stat.retries << 8 | ota_stat.bad),
+                                    ota_stat.sectors);
     }
 
     // --- Main loop: periodic checkin + sleep ---

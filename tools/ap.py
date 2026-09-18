@@ -87,6 +87,10 @@ def fmt(t):
         fault = f" FAULT rf-doorbell cmd={name} phase={why >> 6} cmdsta=0x{why & 0x3F:02x}"
     elif temp8 == 0x98:
         fault = " FAULT watchdog"
+    elif temp8 == 0xA0:
+        # not a fault: the first checkin after an OTA apply
+        fault = (f" OTA-APPLIED sectors={why} retries={detail >> 8} "
+                 f"unverified={detail & 0xFF}")
     elif temp8 == 0xAD and detail == 0x0DB0:
         fault = " FAULT rf-doorbell (pre-v0.21 report)"
     if os.environ.get("OEPL_DIAG") and not fault:

@@ -64,9 +64,9 @@
 // with the "FW vX.Y" string in splash.c. DIAG builds set bit 15 so a debug
 // build (which replaces telemetry with diagnostics) is obvious at the AP.
 #if defined(DIAG_TELEMETRY)
-#define TAG_FW_VERSION  (0x8000 | 0x0017)
+#define TAG_FW_VERSION  (0x8000 | 0x0024)
 #else
-#define TAG_FW_VERSION  0x0017
+#define TAG_FW_VERSION  0x0024
 #endif
 
 // Capabilities
@@ -200,6 +200,9 @@ void oepl_radio_set_wakeup_reason(uint8_t reason);
 #define FAULT_CLASS_HARDFAULT   0x80
 #define FAULT_CLASS_DOORBELL    0x90
 #define FAULT_CLASS_WATCHDOG    0x98
+// Not a fault: the first checkin after an OTA apply reports what the copy did.
+// detail = retries << 8 | sectors that never verified, why = sectors copied.
+#define FAULT_CLASS_OTA_APPLY   0xA0
 void oepl_radio_set_fault_report(uint8_t fault_class, uint16_t detail, uint8_t why);
 
 #ifdef DIAG_TELEMETRY

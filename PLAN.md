@@ -124,18 +124,29 @@ Most findings were already fixed and measured in v0.19/v0.20; PRs are superseded
 - [x] H10: RF core flushes frames rejected by the address filter (bAutoFlushIgn=1); downloads
       unaffected (89.7% yield in the same run).
 - [x] H1/M2: Makefile header deps, flags stamp, link deps — verified (no-op, header touch, flag change)
-- [ ] OTA robustness (H8, M14, M15, L19–L22): check apply status, write "applied" marker after
-      verified apply, RF off during apply, verify through non-cached flash reads. Own task, J-Link
-      as safety net.
+- [x] OTA robustness (H8, M14, M15, L19–L22) — v0.24, bench-verified 2026-09-18 (see Next)
 - [ ] M21: OEPL channel 27 isn't valid for CMD_IEEE_RX (only matters on an AP set to 27)
 - [ ] Radio configs at the real edge (−77 dBm or worse) if a spot like that is available.
 - [ ] Identify the remaining ~59 µA from the board photo.
 
 ## Next
 
-- [ ] OTA robustness (H8, M14, M15, L19–L22): check flash erase/program status during apply,
-      write the "applied" marker only after a verified apply, power the RF core down first,
-      verify through non-cached reads. Bench tag + J-Link as the safety net.
+- [x] **OTA robustness (H8, M14, M15, L19–L22)** — done 2026-09-18, v0.24. The apply now checks
+      every erase/program status and reads each sector back with the VIMS cache invalidated,
+      retrying a bad sector up to 5 times; the "applied" dataVer record is written from the RAM
+      function *after* the copy verifies (an interrupted apply retries instead of being skipped
+      forever); the RF core is shut down and the supply checked (≥ 2400 mV, also before the
+      download starts) before the first erase; the staged reset vector must have the Thumb bit
+      set and point inside the image. Sector 30's record also carries what the copy did, and the
+      installed image reports it once — RTT `OTA apply: sectors=06 retries=00 bad=00` and
+      `OTA-APPLIED` in `tools/ap.py status`.
+      Bench (tag 00124B00181880B0, PPK2 at 3.0 V): 6 OTA cycles, all applied and rebooted, one in
+      **92 s** from queue to the new version checking in. A bad-vector image (Thumb bit cleared —
+      accepted by the old bound) is rejected before any erase and the tag keeps running and backs
+      off. With `BENCH_OTA_FLAKY_APPLY` sabotaging sector 0's first program, the tag still came up
+      on the new image: without the readback+retry that sector would have stayed erased, i.e. a
+      brick. Bench gotcha found and documented: a running `JLinkGDBServer` halts the tag on any
+      reset it performs itself, so reset paths must be tested with the server killed.
 - [ ] The remaining ~59 µA of sleep current: sweep unused pins (pull-down/pull-up/hi-Z) to find
       a load with an enable pin; the board photos narrowed the suspects to the IC by the left
       antenna strip and the cluster wired to the top-edge contacts.
