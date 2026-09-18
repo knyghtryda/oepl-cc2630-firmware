@@ -240,6 +240,35 @@ push to the tag to judge it on the panel, then `install`. Needs
 
 ## Power (measured on the bench, 2026-09-16)
 
+### Battery budget (v0.26, measured 2026-09-18 at 3.0 V)
+
+| item | measured | note |
+|---|---|---|
+| sleep floor | **38.8 µA** | median of quiet seconds, debugger detached |
+| check-in, nothing pending | **~0.2–0.5 µAh** | 0.3 s of radio; a scan costs more than a direct check-in |
+| panel refresh | **~0.032 mAh** | 37.9 s, three consecutive refreshes within 8% |
+| full image update (download + refresh) | 0.267 mAh | measured on v0.20, same radio path |
+
+Weather tag as configured (update every 2 h, check-in every 15 min):
+
+```
+sleep      0.0388 mA x 24 h          = 0.93 mAh/day
+check-ins  96 x 0.4 uAh              = 0.04 mAh/day
+updates    12 x 0.267 mAh            = 3.20 mAh/day
+                                       ---------------
+                                       4.17 mAh/day
+```
+
+4x CR2450 in parallel is 2480 mAh nominal; at ~75% usable against these pulse
+loads and a 2.5 V cutoff, ≈1900 mAh → **≈450 days**. Before the sleep fix
+below it was ≈410 days.
+
+**The image download is 77% of that budget**, and it is raw: 33.6 KB for a BW
+image, 67.2 KB for BWR. The AP already offers compressed images (dataType
+0x30) and this firmware does not decode them — see PLAN.md. A compressed image
+of the same content is ~2.3 KB, which would take the daily total to roughly
+1.2 mAh and the estimate past three years.
+
 **Sleep floor, 2026-09-18: 59.8 µA → 39.3 µA.** The panel's control lines
 (BUSY, RST, DC, BS, CS) are pulled up during sleep instead of being left
 floating; an undefined level on the panel side was costing 20 µA. The shared

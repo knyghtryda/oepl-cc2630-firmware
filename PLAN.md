@@ -153,10 +153,21 @@ Most findings were already fixed and measured in v0.19/v0.20; PRs are superseded
       looked dead. The back-off now gates the transfer only. A/B on the bench with a
       bad-vector image queued: before, silence for 15+ min; after, 14 consecutive check-ins
       over 10 min with no re-download (`tools/ap_log.py` shows no block requests).
-- [ ] The remaining ~59 µA of sleep current: sweep unused pins (pull-down/pull-up/hi-Z) to find
-      a load with an enable pin; the board photos narrowed the suspects to the IC by the left
-      antenna strip and the cluster wired to the top-edge contacts.
-- [ ] Re-measure battery budget on v0.23 (sleep floor, per-update charge) and update DEVELOPMENT.md.
+- [x] **The ~59 µA sleep floor** (2026-09-18): a third of it was the panel's control lines
+      floating. Pulled up during sleep the floor is **38.8 µA**; the shared SPI bus must stay
+      high-impedance. A tag whose panel has never been powered reaches 29.9 µA with every panel
+      line pulled up, so ~10 µA more is available once the bus side is understood. Every other
+      pin group made things worse. The remaining ~39 µA is board-side (the MCU's own standby is
+      ~1 µA) and has no firmware control found so far.
+- [x] **Battery budget re-measured** (2026-09-18, v0.26): see DEVELOPMENT.md. 4.17 mAh/day for
+      the weather tag's cadence → ≈450 days on 4x CR2450, up from ≈410.
+- [ ] **Compressed images (dataType 0x30) are not decoded.** The AP offers them (seen on every
+      `tools/ap.py image` push on 2026-09-18); the tag reads them as raw, runs off the end of the
+      data and fails block 1's checksum forever, so the image never displays. Pre-existing —
+      firmware from before this week's changes fails identically. It matters for battery life as
+      much as for function: the raw download is 77% of the daily budget and a compressed image of
+      the same content is ~15x smaller. Next: identify the AP's exact format (G5/zlib) and whether
+      the `capabilities` field in AvailDataReq can ask for raw as a stopgap.
 
 ## Follow-ups (not blocking)
 
