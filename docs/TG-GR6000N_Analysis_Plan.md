@@ -1,3 +1,9 @@
+> **Correction (2026-09-19).** This document predates working hardware and its
+> claims about a "900 MHz sub-GHz" radio are wrong: the CC2630 is a 2.4 GHz part
+> and the tag runs IEEE 802.15.4 on channel 11. The board's second antenna is an
+> NFC coil (passive NTAG I2C chip on DIO24/25), not a second transmitter. See
+> DEVELOPMENT.md, "Board pin map".
+
 # TG-GR6000N CC2630 Firmware Development Plan
 
 ## Hardware Details

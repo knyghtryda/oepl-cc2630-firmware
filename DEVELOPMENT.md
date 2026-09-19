@@ -266,6 +266,54 @@ filtered, `full` dropped for lack of a free RX entry). A boot after a crash
 prints `LAST FAULT: PC=...` (PC `DEAD0DB0` = RF doorbell hang) and the first
 check-in carries the fault class/detail (see "Reading a crash capture").
 
+## Board pin map (recovered from the stock firmware)
+
+Read out of `reference/stock.bin` (TI-RTOS PIN/SPI/I2C/UART driver tables at
+0xEAA8/0xEB50/0xEB9C/0xEB10) on 2026-09-19, and spot-checked against the
+binary by hand. Our firmware uses only the panel and flash pins; the rest is
+recorded here because it answers several long-standing unknowns.
+
+| DIO | stock function |
+|---|---|
+| 2, 3 | debug UART RX / TX |
+| 4 | pull-up input, never read |
+| 5 | **peripheral power enable (shared: panel *and* NFC)**, open-drain |
+| 6, 7 | 8 mA outputs driven low at boot, never touched again |
+| 8, 9, 10 | SSI0 MISO / MOSI / CLK |
+| 11 | external SPI flash CS |
+| 12–15, 18, 19, 20 | e-paper panel (DIR, BUSY, RST, D/C, BS, data readback, CS) |
+| 16, 17 | outputs gated by per-variant capability bits (LED/buzzer candidates) |
+| 21 | pull-up input, sampled at wake and inside DIO22's interrupt |
+| 22 | positive-edge interrupt input |
+| **24, 25** | **I²C SDA / SCL → NFC tag chip at address 0x55** |
+| 26, 27 | two debounced buttons (short/long press) |
+| 0, 1, 23, 28–30 | unused |
+
+**The second antenna is an NFC coil, not a second radio.** Beside it is a
+passive NFC Type-2 tag IC (NXP NTAG I²C family) that harvests power from a
+phone's field — it has no transmitter of its own. The CC2630 writes an NDEF
+payload into it over I²C (the payload comes from the external SPI flash at
+0xC0000), auto-detecting the 1k and 2k variants from the capability container
+(`E1 10 6D 00` / `E1 10 EA 00`) and verifying its own writes. The whole path
+is behind a capability bit, so the chip is a populate option per variant.
+
+Two consequences for us:
+
+- **DIO5 is probably not "panel power" but a shared peripheral rail** — the
+  stock NFC init power-cycles DIO5 before opening I²C. Worth remembering if
+  anything ever needs the NFC chip or behaves oddly around DIO5.
+- To find out whether our boards actually have the NFC chip fitted: drive DIO5
+  high, then read block 0 from I²C address 0x55 on DIO24/25. An ACK proves it
+  is populated and returns its UID.
+
+Stock never uses BLE or any proprietary/sub-GHz mode — a structural scan of
+the image finds `CMD_IEEE_RX`/`CMD_IEEE_ED_SCAN` command structures and no
+`CMD_BLE_*` or `CMD_PROP_*` at all. (The CC2630 is a 2.4 GHz part; the
+"900 MHz sub-GHz" claims in `docs/` predate working hardware and are wrong.)
+Stock's CPE patch body is byte-identical to our `rf_patches/rf_patch_cpe_ieee.h`,
+so `RF_CFG=1` applies exactly the patch stock uses — it simply does not help,
+because receive sensitivity was never the limit.
+
 ## Radio: what limits a marginal link
 
 Measured 2026-09-19 with the bench tag shielded so both ends sat at about
