@@ -292,7 +292,7 @@ push to the tag to judge it on the panel, then `install`. Needs
 |---|---|---|
 | sleep floor | **39.1 µA** | median of quiet samples, debugger detached |
 | check-in, nothing pending | **~0.2 µAh** | 0.2–0.3 s of radio |
-| full image update, compressed | **0.046 mAh** | 45 s: download 2.2 KB, decode ~1 s, refresh |
+| full image update, compressed | **0.046–0.049 mAh** | 45–48 s: download, decode ~1 s, refresh. 0.046 for a test card (2.2 KB), 0.049 for a weather-layout image (6 KB) |
 | full image update, raw (pre-v0.27) | 0.267 mAh | for comparison — 5.8x more |
 
 Weather tag as configured (update every 2 h, check-in every 15 min):
@@ -300,16 +300,19 @@ Weather tag as configured (update every 2 h, check-in every 15 min):
 ```
 sleep      0.0391 mA x 24 h          = 0.94 mAh/day
 check-ins  96 x 0.2 uAh              = 0.02 mAh/day
-updates    12 x 0.046 mAh            = 0.55 mAh/day
+updates    12 x 0.049 mAh            = 0.59 mAh/day
                                        ---------------
-                                       1.51 mAh/day
+                                       1.54 mAh/day
 ```
 
 4x CR2450 in parallel is 2480 mAh nominal; at ~75% usable against these pulse
 loads and a 2.5 V cutoff, ≈1900 mAh → **≈3.4 years**, against ≈450 days on raw
 images and ≈410 days before the sleep fix as well.
 
-Sleep is now 62% of the budget and the updates are 36%, so the next worthwhile
+Measured on the wire: a test card is 2.2 KB compressed (1 block) against
+67.2 KB raw (17 blocks), a black-and-white image 333 bytes, and the real
+weather layout 6.0 KB (2 blocks, seen on Weather6). Sleep is now 61% of the
+budget and the updates 38%, so the next worthwhile
 power work is the ~39 µA floor rather than anything on the radio.
 
 **Sleep floor, 2026-09-18: 59.8 µA → 39.3 µA.** The panel's control lines
