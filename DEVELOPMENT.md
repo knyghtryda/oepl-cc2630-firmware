@@ -266,6 +266,62 @@ filtered, `full` dropped for lack of a free RX entry). A boot after a crash
 prints `LAST FAULT: PC=...` (PC `DEAD0DB0` = RF doorbell hang) and the first
 check-in carries the fault class/detail (see "Reading a crash capture").
 
+## Radio: what limits a marginal link
+
+Measured 2026-09-19 with the bench tag shielded so both ends sat at about
+−74 dBm and check-ins failed roughly a third of the time. Counting the tag's
+RTT log against the AP's websocket log over the same window splits the
+failures:
+
+```
+50 attempts:  28% the AP never heard the request   (uplink frame lost)
+               4% the tag missed the AP's reply    (downlink)
+              68% succeeded
+```
+
+So the limit at a weak spot is **the uplink frame going missing, not receive
+sensitivity** — which is why the radio-configuration sweep below found
+nothing. The tag now sends the AvailDataReq up to `CHECKIN_TX_TRIES` (3) times
+within one wake, with a fresh sequence number and a short varying gap, instead
+of giving up and backing off for 30 s. Same spot, same shielding:
+
+| | single frame | 3 tries per wake |
+|---|---|---|
+| check-ins completed per wake | 68% | **88%** |
+| wakes the AP heard at all | 72% | **100%** |
+
+It costs nothing when the link is good (the loop exits on the first reply) and
+less than a wasted wake when it is not: early tries listen 800 ms, only the
+last one waits the full 5 s.
+
+### Radio configurations (RF_CFG) — no measurable difference
+
+`make RF_CFG=n` selects: 0 = no patches, Contiki-NG overrides (shipped);
+1 = + TI's CPE IEEE patch (stock and the OEPL alpha both apply it); 2 = 1 +
+the stock firmware's extra overrides (RSSI offset −2 dB, LNA bias trim 15);
+3 = 2 + the RFE patch. Four configs x two rounds x 8 min at the attenuated
+spot, counting completed check-ins:
+
+```
+          round 1   round 2   pooled
+cfg 0       60%       71%       66%
+cfg 1       63%       71%       67%
+cfg 2       57%       60%       59%
+cfg 3       77%       70%       74%
+```
+
+Mean RSSI stayed within 0.5 dB across every run, so the link did not drift.
+Nothing here is significant: the difference between two rounds of the *same*
+config (11 points for cfg 0) is as large as the difference between configs,
+and cfg 3's 8-point edge is about 1.3 standard errors. Worth noting that cfg 2
+reported the same RSSI as the others despite carrying stock's "RSSI −2 dB"
+override, which suggests those overrides may not be taking effect at all.
+
+The honest conclusion is that RX sensitivity was never the bottleneck, so
+these patches had nothing to fix. Re-open only with a way to vary attenuation
+mechanically, which would measure the cliff position directly instead of
+inferring it from a success rate.
+
 ## Weather display (Home Assistant)
 
 Weather6 is driven by the HA automation `weather_forecast_oepl_display`,

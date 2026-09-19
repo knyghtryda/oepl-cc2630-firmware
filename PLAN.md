@@ -187,17 +187,12 @@ Most findings were already fixed and measured in v0.19/v0.20; PRs are superseded
 
 ## Follow-ups (not blocking)
 
-- **Radio link margin** (2026-09-15): the tag fails below ≈−77 dBm while its RX sensitivity
-  should be ≈−95. Facts: the firmware applies *no* RF patches; stock and alpha both apply
-  `rf_patch_cpe_ieee` (found in both binaries) and neither applies MCE/RFE; the stock override
-  table (stock.bin @0xF070) adds `0x000288A3` (RSSI −2 dB reporting), `0x000F8883` (LNA bias
-  trim offset 15 vs TI generic 3) and `0x00018063`. `make RF_PROBE=1` rotates five configs
-  per check-in and reports the config in LQI (`tools/rf_probe_collect.py`): at −46 dBm all
-  five read identically (uninformative), and **the probe build broke image downloads**
-  (block 1 rejected by the checksum on every config; OTA blocks fine) — cause unknown, so
-  its results are void. Next: J-Link on the bench, one config per build, at the far spot
-  (−77…−82): measure check-in success rate and `BP:` parts-per-request. Candidates in
-  order: +CPE patch; +stock overrides; +CPE+RFE.
+- [x] **Radio link margin** — answered 2026-09-19, and it was not sensitivity. With the tag
+      shielded to ~−74 dBm, 28% of check-ins failed because the AP never heard the request
+      against 4% where the tag missed the reply. The RF_CFG sweep (patches/overrides, 4 configs
+      x 2 rounds) found no significant difference, as expected once the failures are known to be
+      uplink. Fixed instead by retrying the AvailDataReq up to 3x within one wake: 68% -> 88%
+      of wakes complete, and the AP now hears every wake. See DEVELOPMENT.md.
 - [x] Fault report is no longer consumed on TX: it stays pending until the AP answers
   (2026-09-19). The check-in carrying a crash report is the one most likely to fail.
 - AP `maxsleep` must stay < 20 min (radio drops pending data after 20 housekeeping minutes).

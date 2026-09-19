@@ -231,8 +231,32 @@ bool oepl_radio_checkin(struct AvailDataInfo *out_info)
     rtt_put_hex8(tx_len);
     rtt_puts("\r\n");
 
-    // 1. Start RX (background, 5s timeout) with explicit channel
-    rf_status_t rc = oepl_rf_rx_start(radio_st.current_ieee_ch, 5000000);
+    // Send it more than once before giving up on this wake. Measured at a
+    // shielded spot (2026-09-19, tag and AP both at about -74 dBm): of 50
+    // check-in attempts, 28% failed because the AP never heard the request
+    // and only 4% because the tag missed the reply -- the losses are the
+    // uplink frame going missing, not sensitivity. One lost frame used to
+    // cost a whole wake and a 30 s back-off; retrying here costs a few
+    // hundred milliseconds of radio and reuses the scan we already paid for.
+    // Early tries listen briefly, the last one waits the full window.
+#ifndef CHECKIN_TX_TRIES
+#define CHECKIN_TX_TRIES 3
+#endif
+for (uint8_t txtry = 0; txtry < CHECKIN_TX_TRIES; txtry++) {
+    if (txtry) {
+        // A fresh sequence number, and a gap that is not the same every time,
+        // so a repeating collision does not repeat forever.
+        ((struct MacFrameBcast *)tx_frame)->seq = radio_st.seq++;
+        oepl_hw_delay_ms(20 + (oepl_rf_rat_now() & 0x7F));
+        rtt_puts("ADR retry ");
+        rtt_put_hex8(txtry);
+        rtt_puts("\r\n");
+    }
+    bool last_try = (txtry + 1 == CHECKIN_TX_TRIES);
+    uint32_t rx_us = last_try ? 5000000 : 800000;
+
+    // 1. Start RX (background) with explicit channel
+    rf_status_t rc = oepl_rf_rx_start(radio_st.current_ieee_ch, rx_us);
     if (rc != RF_OK) return false;
 
     // 2. TX AvailDataReq (foreground within RX)
@@ -307,6 +331,8 @@ bool oepl_radio_checkin(struct AvailDataInfo *out_info)
     }
 
     oepl_rf_rx_stop();
+}
+
     rtt_puts("No AvailDataInfo\r\n");
     return false;
 }
