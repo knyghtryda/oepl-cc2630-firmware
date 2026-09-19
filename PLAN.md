@@ -175,6 +175,16 @@ Most findings were already fixed and measured in v0.19/v0.20; PRs are superseded
       Tested byte-exact on the host against the AP's own compressor (six images including
       incompressible data) and fuzzed with 20,000 corrupt streams under ASan/UBSan.
 
+- [x] **Sleep floor 39 µA → 9.1 µA** (2026-09-18, v0.29). The panel's SDA-direction line
+      (DIO12) was the missing piece: pulled up alongside DC (DIO15) the floor drops from
+      39.3 µA to 8.6, and with the other three control lines 9.1 µA. Per-pin measurements and
+      the things that did *not* help (BATMON gating, configuring the ~20 idle DIOs the way the
+      stock firmware does — which also sagged the tag's supply reading to 2203 mV) are in
+      DEVELOPMENT.md. The stock firmware was disassembled for comparison: identical CCFG, DC/DC
+      and standby sequence, so pin configuration was the whole difference.
+      Daily budget 1.54 → **0.83 mAh**, i.e. ~6 years on 4x CR2450, where cell self-discharge
+      starts to matter as much as the tag. Updates are now 71% of the budget.
+
 ## Follow-ups (not blocking)
 
 - **Radio link margin** (2026-09-15): the tag fails below ≈−77 dBm while its RX sensitivity

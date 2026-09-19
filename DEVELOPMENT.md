@@ -286,46 +286,64 @@ push to the tag to judge it on the panel, then `install`. Needs
 
 ## Power (measured on the bench, 2026-09-16)
 
-### Battery budget (v0.27, measured 2026-09-18 at 3.0 V)
+### Battery budget (v0.29, measured 2026-09-18 at 3.0 V)
 
 | item | measured | note |
 |---|---|---|
-| sleep floor | **39.1 µA** | median of quiet samples, debugger detached |
-| check-in, nothing pending | **~0.2 µAh** | 0.2–0.3 s of radio |
-| full image update, compressed | **0.046–0.049 mAh** | 45–48 s: download, decode ~1 s, refresh. 0.046 for a test card (2.2 KB), 0.049 for a weather-layout image (6 KB) |
-| full image update, raw (pre-v0.27) | 0.267 mAh | for comparison — 5.8x more |
+| sleep floor | **9.1 µA** | median of quiet samples, debugger detached (p10 8.3, p90 9.5) |
+| check-in, nothing pending | ~0.2 µAh | 0.2–0.3 s of radio |
+| image update, compressed | 0.046–0.049 mAh | 45–48 s; 0.049 for a weather-layout image |
 
 Weather tag as configured (update every 2 h, check-in every 15 min):
 
 ```
-sleep      0.0391 mA x 24 h          = 0.94 mAh/day
+sleep      0.0091 mA x 24 h          = 0.22 mAh/day
 check-ins  96 x 0.2 uAh              = 0.02 mAh/day
 updates    12 x 0.049 mAh            = 0.59 mAh/day
                                        ---------------
-                                       1.54 mAh/day
+                                       0.83 mAh/day
 ```
 
 4x CR2450 in parallel is 2480 mAh nominal; at ~75% usable against these pulse
-loads and a 2.5 V cutoff, ≈1900 mAh → **≈3.4 years**, against ≈450 days on raw
-images and ≈410 days before the sleep fix as well.
+loads and a 2.5 V cutoff, ≈1900 mAh → **≈6 years**, at which point the cells'
+own self-discharge (~1%/year) matters as much as the tag does. The updates are
+now 71% of the budget and sleep 27%.
 
-Measured on the wire: a test card is 2.2 KB compressed (1 block) against
-67.2 KB raw (17 blocks), a black-and-white image 333 bytes, and the real
-weather layout 6.0 KB (2 blocks, seen on Weather6). Sleep is now 61% of the
-budget and the updates 38%, so the next worthwhile
-power work is the ~39 µA floor rather than anything on the radio.
+Where it came from, in order: 59.8 µA originally, 39.3 µA once the panel's
+control lines were pulled up (2026-09-18), 9.1 µA once DIO12 (SDA direction)
+joined them.
 
-**Sleep floor, 2026-09-18: 59.8 µA → 39.3 µA.** The panel's control lines
-(BUSY, RST, DC, BS, CS) are pulled up during sleep instead of being left
-floating; an undefined level on the panel side was costing 20 µA. The shared
-SPI bus (MOSI/MISO/CLK/DIR) must stay high-impedance — pulling it up keeps
-something on that bus alive and the tag never settles (>500 µA). Found with
-`EXTRA_DEFINES="-DDIAG_PIN_MODE=n -DDIAG_PIN_MASK=0x..."` on a
-`DIAG_SLEEP_ONLY=1` build (mode 1 = pull down, 2 = pull up, 3/4 = driven
-low/high), then confirmed in the production firmware with
-`-DEPD_OFF_PULLUP_MASK=...`. Verified the panel still comes back:
-`EXTRA_DEFINES=-DBENCH_SPLASH_LOOP` refreshes, sleeps and refreshes again —
-three clean refreshes with the pull-ups in place.
+### Sleep floor: what actually mattered
+
+Everything below was measured on the bench with `tools/bench_sleep.sh`, which
+builds, flashes, power-cycles and reports the median of the quiet seconds.
+
+| configuration | floor |
+|---|---|
+| all nine panel lines floating | 59.8 µA |
+| pull-up on DIO15 (DC) only | 36.5 µA |
+| pull-up on DIO12 (DIR) only | 25.1 µA |
+| pull-ups on DIO12 + DIO15 | 8.6 µA |
+| **pull-ups on DIO12,13,14,15,18,20** | **9.1 µA** (shipped) |
+| …plus the SPI bus (DIO8,9,10) | >2000 µA, never settles |
+
+The panel's inputs were floating, so their input stages drew crowbar current;
+DC and DIR are what matter and the rest are worth a few tenths of a µA. The
+SPI bus is shared with the external flash and has to stay high-impedance.
+
+Things that were tried and made no measurable difference at this floor, so are
+not in the firmware: disabling AON_BATMON between readings (9.1 vs 9.2 µA, and
+it broke telemetry — see oepl_hw_get_voltage), and copying the stock
+firmware's configuration for the ~20 DIOs nothing else touches (unchanged
+standby, and the tag's own supply reading fell to 2203 mV, so those pins draw
+current while awake). Powering the external flash down does matter: ~4 µA,
+and it is now done on every boot rather than only a cold one.
+
+The stock firmware was disassembled to compare (`reference/stock.bin`, TI-RTOS
++ PowerCC26XX): its CCFG is byte-identical to ours, it uses the same DC/DC
+settings and the same standby sequence, and it has nothing in that sequence we
+lack — the difference was entirely in pin configuration.
+
 
 
 Bench tag `00124B00181880B0` "OEPL-DEBUG" powered by a Nordic PPK2 at 3.0 V,

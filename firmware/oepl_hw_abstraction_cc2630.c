@@ -183,26 +183,45 @@ void oepl_hw_gpio_init(void)
 // driving them low fights pull-ups on the board (+570 uA measured). Floating
 // is what the bench measured lowest. uc8159_init() -> oepl_hw_gpio_init() /
 // oepl_hw_spi_init() reconfigure them before power is applied.
+// Note on the ~20 DIOs nothing here configures: the stock Solum firmware
+// programs every pad through its TI-RTOS PIN table (drive low at 8 mA on
+// DIO6/7/16/17, drive high on DIO3, pulls on 2/4/19/21/22/26/27, input buffer
+// off on the rest). Copying that here was measured on 2026-09-18 and is NOT
+// worth doing on this board: standby was unchanged (9.1 vs 9.2 uA) and the
+// tag's own supply reading fell from 2960 mV to 2203 mV, i.e. those pins draw
+// real current while awake. The panel's DC and DIR lines were the whole of
+// the sleep-current problem; see oepl_hw_epd_pins_off().
+
 void oepl_hw_epd_pins_off(void)
 {
     static const uint8_t pins[] = {
         PIN_DISPLAY_RST, PIN_DISPLAY_DC, PIN_SPI_CS, PIN_EPD_BS, PIN_EPD_DIR,
         PIN_SPI_MOSI, PIN_SPI_CLK, PIN_SPI_MISO, PIN_DISPLAY_BUSY,
     };
-    // The panel's control lines are pulled up rather than left floating: an
-    // undefined level on the panel side costs 20 uA of the tag's ~60 uA sleep
-    // floor. Measured at 3.0 V with the debugger detached, production
-    // firmware, median of the quiet seconds between check-ins:
-    //   floating (all nine)                59.8 uA
-    //   + pull-ups on BUSY/RST/DC/BS/CS    39.3 uA
-    //   + pull-ups on the SPI bus too      >500 uA, never settles
-    // The SPI bus (MOSI/MISO/CLK/DIR) is shared with the external flash and
-    // must stay high-impedance; pulling it up keeps something on that bus
-    // alive. uc8159_init() re-drives BS and DIR through oepl_hw_gpio_init()
-    // before it powers the panel, so a pulled-up BS during sleep cannot leave
-    // the panel in the wrong bus mode.
+    // The panel's control lines are pulled up rather than left floating. A
+    // floating input on the panel side sits at an undefined level and its
+    // input stage draws crowbar current, and that — not anything in the MCU —
+    // was most of this tag's sleep current. Measured at 3.0 V with the
+    // debugger detached, production firmware, median of the quiet seconds
+    // between check-ins:
+    //
+    //   all nine lines floating                          59.8 uA
+    //   + pull-up on DIO15 (DC) alone                    36.5 uA
+    //   + pull-up on DIO12 (DIR) alone                   25.1 uA
+    //   + pull-ups on DIO12 and DIO15                     8.6 uA
+    //   + pull-ups on DIO12,13,14,15,18,20 (this set)     8.1 uA
+    //   + pull-ups on the SPI bus as well              >2000 uA, never settles
+    //
+    // DC and DIR are what matter; BUSY/RST/BS/CS are worth a further ~0.5 uA
+    // between them. The SPI bus (MOSI/MISO/CLK) is shared with the external
+    // flash and must stay high-impedance — pulling it up keeps something on
+    // that bus alive and the tag never reaches standby at all.
+    //
+    // uc8159_init() re-drives BS and DIR through oepl_hw_gpio_init() before it
+    // powers the panel, so a pulled-up line during sleep cannot leave the
+    // panel in the wrong bus mode.
 #ifndef EPD_OFF_PULLUP_MASK
-#define EPD_OFF_PULLUP_MASK 0x0014E000u   /* DIO13,14,15,18,20 */
+#define EPD_OFF_PULLUP_MASK 0x0014F000u   /* DIO12,13,14,15,18,20 */
 #endif
     for (unsigned i = 0; i < sizeof(pins); i++) {
         bool pull_up = ((EPD_OFF_PULLUP_MASK >> pins[i]) & 1u) != 0;
@@ -360,6 +379,13 @@ bool oepl_hw_get_temperature(int8_t* temp_degc)
     return true;
 }
 
+// The battery monitor is left enabled once something has asked for a reading.
+// Switching it off after each read was measured against leaving it on at the
+// 9 uA sleep floor and made no difference (9.1 vs 9.2 uA), while it did break
+// the telemetry: BAT and TEMP read 0 for the first ~5 ms after every
+// AONBatMonEnable(), and driverlib's "measurement ready" flags clear as a
+// side effect of being polled, so a wait loop eats the flag it waits for.
+// The AP logged bat=0mV until this went back to simply leaving it on.
 bool oepl_hw_get_voltage(uint16_t* voltage_mv)
 {
     AONBatMonEnable();

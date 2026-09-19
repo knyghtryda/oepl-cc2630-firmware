@@ -30,6 +30,8 @@
 
 // Deep sleep: AON wakeup controller, event routing, interrupts, IO latch
 #include "aon_wuc.h"
+#include "aon_batmon.h"
+#include "hw_aon_batmon.h"
 #include "aon_event.h"
 #include "interrupt.h"
 #include "hw_ints.h"
@@ -893,6 +895,17 @@ int main(void)
 
     if (!warm_boot) stack_paint();
 
+
+    // The JTAG power domain is left on by the ROM boot. Nothing needs it once
+    // the tag is running on its own, and TI's Power driver turns it off for
+    // the same reason. Keep it on while a debugger is actually attached, or
+    // the session dies on the next sleep.
+#ifndef BENCH_JTAG_STAYS_ON
+    if (!debugger_attached()) {
+        AONWUCJtagPowerOff();
+    }
+#endif
+
     // Watchdog: from here on anything that hangs for ~90s gets reset.
     oepl_hw_wdt_init();
 
@@ -954,7 +967,24 @@ int main(void)
     IOCPortConfigureSet(10, IOC_PORT_GPIO, IOC_NO_IOPULL | IOC_INPUT_DISABLE);
 
     rtt_puts("DIAG_SLEEP_ONLY\r\n");
-    while (1) enter_sleep(20);
+    while (1) {
+        enter_sleep(20);
+        // What the power configuration actually looked like at the moment of
+        // the sleep call. With a debugger attached the part never reaches
+        // standby, but these are the registers that decide whether it would.
+        static const char *names[] = { "wakes", "OSC_CTL0", "", "AONPWRSTAT",
+                                       "AONCTL0", "JTAGCFG", "", "PDSTAT0",
+                                       "PDSTAT1", "", "PDCTL1", "AUXCTL",
+                                       "", "", "VDCTL", "magic" };
+        for (uint8_t i = 0; i < 16; i++) {
+            if (!names[i][0]) continue;
+            rtt_puts(names[i]);
+            rtt_puts("=");
+            rtt_put_hex32(sleep_snap[i]);
+            rtt_puts(" ");
+        }
+        rtt_puts("\r\n");
+    }
 #endif
 
     // Report the last OTA apply (written from RAM by apply_ota, read here on
@@ -1012,7 +1042,12 @@ int main(void)
     // both draw paths call uc8159_wake(). External flash: deep power-down.
     oepl_hw_gpio_init();
     oepl_hw_epd_pins_off();
-    if (!warm_boot) oepl_hw_flash_deep_sleep();
+#ifndef BENCH_NO_FLASH_DPD
+    // Deep power-down for the external SPI flash. Done on every boot, not
+    // just a cold one: a warm boot (our own reset) leaves it in standby,
+    // which costs far more than deep power-down on a typical SPI NOR.
+    oepl_hw_flash_deep_sleep();
+#endif
 
     // --- Initialize RF core ---
     rf_status_t rc = oepl_rf_init();
