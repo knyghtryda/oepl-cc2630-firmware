@@ -198,8 +198,8 @@ Most findings were already fixed and measured in v0.19/v0.20; PRs are superseded
   its results are void. Next: J-Link on the bench, one config per build, at the far spot
   (−77…−82): measure check-in success rate and `BP:` parts-per-request. Candidates in
   order: +CPE patch; +stock overrides; +CPE+RFE.
-- Fault report is consumed on the first AvailDataReq TX even if the AP never hears it
-  (`oepl_radio_cc2630.c`); keep it pending until a checkin succeeds.
+- [x] Fault report is no longer consumed on TX: it stays pending until the AP answers
+  (2026-09-19). The check-in carrying a crash report is the one most likely to fail.
 - AP `maxsleep` must stay < 20 min (radio drops pending data after 20 housekeeping minutes).
 
 - The one v0.11 HardFault (2026-09-13 10:16) was never identified; it happened at 2.9 V and
@@ -217,7 +217,8 @@ the AP records a matching hash. Stretch (open): first-cycle success.
 
 ## Backlog (from README known issues — not scheduled)
 
-- DIO13 (BUSY) always reads HIGH; refresh wait runs to full timeout
-- AON_RTC CH0 compare event unreliable (RTC polling workaround in place)
-- UART TX debug output unverified
-- Channel-11 congestion causes occasional part loss (ring buffer should help; re-measure)
+- ~~DIO13 (BUSY) always reads HIGH~~ — resolved: refreshes end on BUSY at ~7.7 s (2026-09-19)
+- ~~AON_RTC CH0 compare event unreliable~~ — resolved by the standby rework (v0.19)
+- UART TX debug output unverified (and off by default; it kept the serial domain powered)
+- Channel-11 congestion causes occasional part loss — much less exposure now that a
+  compressed image is 1-2 blocks instead of 17

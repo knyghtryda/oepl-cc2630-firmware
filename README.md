@@ -153,11 +153,29 @@ the FTDI adapter used for cc2538-bsl flashing.
 
 ## Known Issues
 
-- **DIO13 (BUSY)** always reads HIGH — likely FPC cable or hardware issue. Display refreshes work but BUSY polling runs to full timeout.
-- **Sleep current ~59 µA** (v0.20, measured) — down from ~2 mA; true CC2630 standby is ~1–2 µA, the rest is unexplained (see DEVELOPMENT.md).
-- **~100 s per image** — the AP delivers a full block on the first request only sometimes (~3 requests/block, AP-side). Attempts are cheap (burst idle-timeout) so this is a speed issue, not a reliability one.
-- **OEPL channel 27 is unusable on this chip** — `CMD_IEEE_RX` takes 11–26 only, and channel 27 wedged the radio core until the tag reset (fixed in v0.22 by skipping it; the AP must not be set to channel 27).
-- **UART debug mirror** off by default (`-DRTT_UART`); it never produced output on this board and kept the serial domain powered. Use RTT.
+- **Weak-signal cliff at about −77 dBm.** The tag stops hearing the AP well
+  above where a CC2630 should (≈−95 dBm for 802.15.4). This firmware applies
+  no RF patches, while the stock and OEPL-alpha firmwares both apply
+  `rf_patch_cpe_ieee` and stock adds override entries (LNA bias trim, RSSI
+  offset). Untested at the edge — see PLAN.md.
+- **A compressed image larger than 20 KB will not display.** Images are staged
+  in flash sectors 16–20 before decoding; anything bigger is refused and
+  retried. The weather layout is ~6 KB and a test card ~2.2 KB, so there is
+  room, but a heavily dithered photograph could exceed it.
+- **OEPL channel 27 is unusable on this chip** — `CMD_IEEE_RX` takes 11–26
+  only, and channel 27 wedged the radio core until the tag reset (fixed in
+  v0.22 by skipping it; the AP must not be set to channel 27).
+- **The reported firmware version selects the AP's image format.** At 39 or
+  above the AP sends zlib-compressed images (which this firmware decodes);
+  below 39 it sends raw. See DEVELOPMENT.md before changing the version.
+- **UART debug mirror** off by default (`-DRTT_UART`); it never produced
+  output on this board and kept the serial domain powered. Use RTT.
+
+Fixed since the first release, and no longer issues: sleep current (≈2 mA →
+59 µA → **9.1 µA**), image transfer time (~100 s → ~45 s, and 1–2 blocks
+instead of 17 now that images are compressed), the radio core hanging on
+channel 27, and DIO13/BUSY — the panel does drive BUSY and refreshes now end
+on it (~7.7 s) rather than running to a timeout.
 
 ## Based On
 

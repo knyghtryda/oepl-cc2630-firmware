@@ -22,10 +22,12 @@ static radio_state_t radio_st;
 static uint8_t tx_frame[64];
 static uint8_t g_wakeup_reason = WAKEUP_REASON_FIRSTBOOT;
 static bool g_fault_pending;
+static bool g_fault_reported;   // went out in the frame we are waiting on
 static uint8_t g_fault_class, g_fault_why;
 static uint16_t g_fault_detail;
 #ifdef DIAG_TELEMETRY
 static bool g_diag_pending;
+static bool g_diag_reported;
 static uint8_t g_diag_lqi, g_diag_temp;
 static uint16_t g_diag_bat;
 uint16_t g_diag_requests, g_diag_rf_nok, g_diag_rf_full;
@@ -195,18 +197,22 @@ bool oepl_radio_checkin(struct AvailDataInfo *out_info)
     req->temperature = temp_c;
     req->batteryMv = bat_mv;
     if (g_fault_pending) {
-        // Crash report rides in the telemetry fields for this one checkin
+        // Crash report rides in the telemetry fields for this one checkin.
+        // It stays pending until the AP actually answers: the check-in that
+        // carries a crash report is the one most likely to fail (the tag has
+        // just reset), and clearing it here threw the report away on a
+        // check-in the AP never heard.
         req->batteryMv = g_fault_detail;
         req->temperature = (int8_t)g_fault_class;
         req->lastPacketLQI = g_fault_why;
-        g_fault_pending = false;
+        g_fault_reported = true;
     }
 #ifdef DIAG_TELEMETRY
     else if (g_diag_pending) {
         req->lastPacketLQI = g_diag_lqi;
         req->temperature = (int8_t)g_diag_temp;
         req->batteryMv = g_diag_bat;
-        g_diag_pending = false;
+        g_diag_reported = true;
     }
 #endif
     req->hwType = HW_TYPE;
@@ -280,6 +286,18 @@ bool oepl_radio_checkin(struct AvailDataInfo *out_info)
                     rtt_puts("Got AvailDataInfo type=");
                     rtt_put_hex8(info->dataType);
                     rtt_puts("\r\n");
+                    // The AP answered, so anything that rode out with this
+                    // check-in has been delivered.
+                    if (g_fault_reported) {
+                        g_fault_pending = false;
+                        g_fault_reported = false;
+                    }
+#ifdef DIAG_TELEMETRY
+                    if (g_diag_reported) {
+                        g_diag_pending = false;
+                        g_diag_reported = false;
+                    }
+#endif
                     return true;
                 }
                 rtt_puts("CRC fail\r\n");
