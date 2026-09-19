@@ -64,16 +64,18 @@
 // with the "FW vX.Y" string in splash.c. DIAG builds set bit 15 so a debug
 // build (which replaces telemetry with diagnostics) is obvious at the AP.
 //
-// *** CEILING: 38 (0x26) until this firmware can decode zlib images. ***
-// The AP compresses by version threshold, not by the capabilities field: for
-// hwType 0x35 its tagtypes/35.json says "zlib_compression": "27", read as
-// hex, so a tag reporting 39 or more is served DATATYPE_IMG_ZLIB (0x30). This
-// firmware reads those as raw, runs off the end of the data and never
-// displays them. Bumping past 38 silently stops every image from working.
+// The reported version also switches the AP's image format, which is why it
+// is not just a label: the AP compresses by version threshold, not by the
+// capabilities field. For hwType 0x35 its tagtypes/35.json says
+// "zlib_compression": "27" — read as hex — so a tag reporting 39 or more is
+// served DATATYPE_IMG_ZLIB (0x30) instead of raw. Since v0.27 this firmware
+// decodes that (inflate.c), so 39+ is what we want: the same picture is
+// ~30x smaller on the air. Dropping back below 39 is the way to ask the AP
+// for raw images again if the decoder ever needs to be bypassed.
 #if defined(DIAG_TELEMETRY)
-#define TAG_FW_VERSION  (0x8000 | 0x0026)
+#define TAG_FW_VERSION  (0x8000 | 0x0028)
 #else
-#define TAG_FW_VERSION  0x0026
+#define TAG_FW_VERSION  0x0028
 #endif
 
 // Capabilities
@@ -82,6 +84,9 @@
 // Data types
 #define DATATYPE_NOUPDATE       0x00
 #define DATATYPE_FW_UPDATE      0x03
+#define DATATYPE_IMG_RAW_1BPP   0x20
+#define DATATYPE_IMG_RAW_2BPP   0x21
+#define DATATYPE_IMG_ZLIB       0x30   // zlib-compressed, 4 KB window
 
 // --- Protocol Structs (packed, little-endian on wire) ---
 

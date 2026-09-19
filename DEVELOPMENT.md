@@ -26,19 +26,50 @@ with bit 15 set (32783 for v0.15). Never ship it — it replaces real telemetry.
 
 ## Version bumps
 
-**Never report a version above 38 (0x26).** The AP decides whether to compress
-an image from the tag's *reported version*, not from the `capabilities` field:
-`http://192.168.5.4/tagtypes/35.json` carries `"zlib_compression": "27"`, read
-as hex (39), and `contentmanager.cpp` does
+**The reported version selects the AP's image format.** The AP decides whether
+to compress from the tag's *reported version*, not from the `capabilities`
+field: `http://192.168.5.4/tagtypes/35.json` carries
+`"zlib_compression": "27"`, read as hex (39), and `contentmanager.cpp` does
 `if (hwdata.zlib != 0 && taginfo->tagSoftwareVersion >= hwdata.zlib)`. A tag
-that reports 39 or more is served `DATATYPE_IMG_ZLIB` (0x30); this firmware
-reads it as raw, runs past the end of the data and fails the next block's
-checksum forever, so **no image ever displays again** — with no error anywhere
-except the tag's RTT log. Cost half an hour on 2026-09-18, on both tags at
-once, after a day of bumping the version for OTA tests.
+reporting 39 or more is served `DATATYPE_IMG_ZLIB` (0x30) instead of raw.
 
-Until the tag can inflate zlib, keep bumps inside 0x18–0x26 and identify
-builds by the git commit, not the wire version.
+Since v0.27 that is what we want — `firmware/inflate.c` decodes it and the
+same picture costs 2.2 KB instead of 67 KB. Reporting **below 39 asks the AP
+for raw images again**, which is the escape hatch if the decoder ever needs to
+be bypassed. (Before v0.27 it was a trap: crossing 39 during OTA testing broke
+images on both tags with no error anywhere except the tag's RTT log.)
+
+## Compressed images
+
+```
+tools/ap.py image MAC            # AP compresses for a tag reporting >= 39
+host_test/run_tests.sh           # decoder tests, no hardware needed
+host_test/run_tests.sh --fetch   # re-pull raw images from the AP first
+```
+
+The payload is a 4-byte uncompressed length, then a zlib stream whose content
+is a 6-byte header (`6, width, height, planes`) followed by plane 1 and, for a
+red image, plane 2. The AP's miniz is built with a 4 KB dictionary and stamps
+`CINFO=4`, so a 4 KB window is enough — `red_buf` is reused for it.
+
+The tag stages the compressed image in flash (sectors 16–20) exactly as it
+stages firmware, then decodes straight out of it. For a two-plane image the
+first plane goes back to flash (sectors 21–29) because the panel wants the
+planes interleaved as 4bpp pixels while the stream delivers them one after the
+other; the second plane is interleaved against it row by row, so the panel is
+fed in a single pass. The stream's Adler-32 is checked before the refresh, so
+a corrupt image leaves the previous picture on the panel instead of painting
+it. Decode takes ~1 s for a 600x448 BWR image.
+
+`host_test/` holds a replica of the AP's compressor built from the AP's own
+`miniz-oepl`, so the tests run against bit-identical input: six images
+(including incompressible random data) decode byte-exact, and 20,000
+truncated or bit-flipped streams are rejected without a crash, an overrun or a
+hang under ASan/UBSan.
+
+**Stack:** each check-in logs `stack free=` — the bytes of stack never touched
+since cold boot. The decoder brought this down to ~1.8 KB spare; if a change
+takes it near zero, .noinit (crash records) is what gets corrupted first.
 
 
 Two places, keep them in sync:
@@ -255,34 +286,31 @@ push to the tag to judge it on the panel, then `install`. Needs
 
 ## Power (measured on the bench, 2026-09-16)
 
-### Battery budget (v0.26, measured 2026-09-18 at 3.0 V)
+### Battery budget (v0.27, measured 2026-09-18 at 3.0 V)
 
 | item | measured | note |
 |---|---|---|
-| sleep floor | **38.8 µA** | median of quiet seconds, debugger detached |
-| check-in, nothing pending | **~0.2–0.5 µAh** | 0.3 s of radio; a scan costs more than a direct check-in |
-| panel refresh | **~0.032 mAh** | 37.9 s, three consecutive refreshes within 8% |
-| full image update (download + refresh) | 0.267 mAh | measured on v0.20, same radio path |
+| sleep floor | **39.1 µA** | median of quiet samples, debugger detached |
+| check-in, nothing pending | **~0.2 µAh** | 0.2–0.3 s of radio |
+| full image update, compressed | **0.046 mAh** | 45 s: download 2.2 KB, decode ~1 s, refresh |
+| full image update, raw (pre-v0.27) | 0.267 mAh | for comparison — 5.8x more |
 
 Weather tag as configured (update every 2 h, check-in every 15 min):
 
 ```
-sleep      0.0388 mA x 24 h          = 0.93 mAh/day
-check-ins  96 x 0.4 uAh              = 0.04 mAh/day
-updates    12 x 0.267 mAh            = 3.20 mAh/day
+sleep      0.0391 mA x 24 h          = 0.94 mAh/day
+check-ins  96 x 0.2 uAh              = 0.02 mAh/day
+updates    12 x 0.046 mAh            = 0.55 mAh/day
                                        ---------------
-                                       4.17 mAh/day
+                                       1.51 mAh/day
 ```
 
 4x CR2450 in parallel is 2480 mAh nominal; at ~75% usable against these pulse
-loads and a 2.5 V cutoff, ≈1900 mAh → **≈450 days**. Before the sleep fix
-below it was ≈410 days.
+loads and a 2.5 V cutoff, ≈1900 mAh → **≈3.4 years**, against ≈450 days on raw
+images and ≈410 days before the sleep fix as well.
 
-**The image download is 77% of that budget**, and it is raw: 33.6 KB for a BW
-image, 67.2 KB for BWR. The AP already offers compressed images (dataType
-0x30) and this firmware does not decode them — see PLAN.md. A compressed image
-of the same content is ~2.3 KB, which would take the daily total to roughly
-1.2 mAh and the estimate past three years.
+Sleep is now 62% of the budget and the updates are 36%, so the next worthwhile
+power work is the ~39 µA floor rather than anything on the radio.
 
 **Sleep floor, 2026-09-18: 59.8 µA → 39.3 µA.** The panel's control lines
 (BUSY, RST, DC, BS, CS) are pulled up during sleep instead of being left

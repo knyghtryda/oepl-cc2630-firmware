@@ -45,6 +45,17 @@ bool oepl_ota_take_apply_report(struct ota_apply_stat *out);
 // Does NOT return on success. On failure, returns so caller can retry later.
 void oepl_ota_download_and_apply(struct AvailDataInfo *info);
 
+// Download info->dataSize bytes into flash at `base` (each block checksummed
+// and read back with the cache invalidated). Shared by the firmware and
+// compressed-image paths.
+bool oepl_ota_stage_download(struct AvailDataInfo *info, uint32_t base,
+                             uint32_t max_bytes);
+
+// Flash primitives (ROM FSM, interrupts masked, standby re-enabled after).
+uint32_t oepl_flash_erase_sector(uint32_t addr);
+uint32_t oepl_flash_program(const uint8_t *data, uint32_t addr, uint32_t len);
+void oepl_flash_cache_invalidate(void);
+
 // Check if the offered dataVer matches the last successfully applied OTA.
 // Returns true if the tag already has this firmware.
 bool oepl_ota_already_applied(uint64_t dataVer);

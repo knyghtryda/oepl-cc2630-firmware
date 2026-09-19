@@ -303,6 +303,91 @@ static bool verify_block_checksum(const uint8_t *buf, uint32_t data_len)
     return (actual == expected);
 }
 
+// Download `info->dataSize` bytes into flash at `base`, one 4 KB sector per
+// block, checking each block's checksum and reading every sector back with the
+// cache invalidated. Shared by the firmware path and the compressed-image
+// path: both are far too big to hold in RAM. Logs the reason and returns
+// false on any failure.
+bool oepl_ota_stage_download(struct AvailDataInfo *info, uint32_t base,
+                             uint32_t max_bytes)
+{
+    uint32_t size = info->dataSize;
+    if (size == 0 || size > max_bytes) {
+        rtt_puts("\r\nDL: size ");
+        rtt_put_hex32(size);
+        rtt_puts(" does not fit staging\r\n");
+        return false;
+    }
+
+    uint32_t num_blocks = (size + BLOCK_DATA_SIZE - 1) / BLOCK_DATA_SIZE;
+    rtt_puts("DL: blocks=");
+    rtt_put_hex8((uint8_t)num_blocks);
+    rtt_puts("\r\n");
+
+    for (uint32_t block_id = 0; block_id < num_blocks; block_id++) {
+        uint16_t block_size;
+
+        // Strict: every part of every block, no partial acceptance
+        if (!ota_download_block((uint8_t)block_id, info, bw_buf, &block_size)) {
+            rtt_puts("\r\nDL: fail b=");
+            rtt_put_hex8((uint8_t)block_id);
+            rtt_puts("\r\n");
+            return false;
+        }
+
+        uint32_t remaining = size - block_id * BLOCK_DATA_SIZE;
+        uint32_t data_len = (remaining > BLOCK_DATA_SIZE) ? BLOCK_DATA_SIZE : remaining;
+
+        if (!verify_block_checksum(bw_buf, data_len)) {
+            rtt_puts("\r\nDL: checksum fail b=");
+            rtt_put_hex8((uint8_t)block_id);
+            rtt_puts("\r\n");
+            return false;
+        }
+        rtt_puts("C");
+
+        uint32_t addr = base + block_id * OTA_SECTOR_SIZE;
+        uint32_t data_offset = BLOCK_HEADER_SIZE;   // skip the BlockData header
+
+        rtt_puts("E");
+        if (staging_erase_sector(addr) != FAPI_STATUS_SUCCESS) {
+            rtt_puts("!\r\nDL: erase fail s=");
+            rtt_put_hex8((uint8_t)block_id);
+            rtt_puts("\r\n");
+            return false;
+        }
+
+        rtt_puts("P");
+        if (staging_program(&bw_buf[data_offset], addr, data_len) != FAPI_STATUS_SUCCESS) {
+            rtt_puts("!\r\nDL: prog fail s=");
+            rtt_put_hex8((uint8_t)block_id);
+            rtt_puts("\r\n");
+            return false;
+        }
+
+        rtt_puts("V");
+        vims_invalidate();
+        if (!staging_verify(addr, &bw_buf[data_offset], data_len)) {
+            rtt_puts("!\r\nDL: verify fail s=");
+            rtt_put_hex8((uint8_t)block_id);
+            rtt_puts("\r\n");
+            return false;
+        }
+
+        rtt_puts("+ ");
+    }
+    return true;
+}
+
+// Flash primitives for callers outside this file: the image path stages a
+// compressed picture, and its decoded first plane, the same way firmware is.
+uint32_t oepl_flash_erase_sector(uint32_t addr) { return staging_erase_sector(addr); }
+uint32_t oepl_flash_program(const uint8_t *data, uint32_t addr, uint32_t len)
+{
+    return staging_program((uint8_t *)data, addr, len);
+}
+void oepl_flash_cache_invalidate(void) { vims_invalidate(); }
+
 // --- Main OTA orchestrator ---
 
 void oepl_ota_download_and_apply(struct AvailDataInfo *info)
@@ -336,72 +421,7 @@ void oepl_ota_download_and_apply(struct AvailDataInfo *info)
         return;
     }
 
-    // Calculate number of blocks needed
-    uint32_t num_blocks = (fw_size + BLOCK_DATA_SIZE - 1) / BLOCK_DATA_SIZE;
-    rtt_puts("OTA: blocks=");
-    rtt_put_hex8((uint8_t)num_blocks);
-    rtt_puts("\r\n");
-
-    // Download each block to staging flash
-    for (uint32_t block_id = 0; block_id < num_blocks; block_id++) {
-        uint16_t block_size;
-
-        // Strict download: requires ALL 42 parts
-        if (!ota_download_block((uint8_t)block_id, info, bw_buf, &block_size)) {
-            rtt_puts("\r\nOTA: DL fail b=");
-            rtt_put_hex8((uint8_t)block_id);
-            rtt_puts("\r\n");
-            return;  // Abort — AP will retry next checkin
-        }
-
-        // Verify block checksum from BlockData header
-        uint32_t remaining = fw_size - block_id * BLOCK_DATA_SIZE;
-        uint32_t data_len = (remaining > BLOCK_DATA_SIZE) ? BLOCK_DATA_SIZE : remaining;
-
-        if (!verify_block_checksum(bw_buf, data_len)) {
-            rtt_puts("\r\nOTA: checksum fail b=");
-            rtt_put_hex8((uint8_t)block_id);
-            rtt_puts("\r\n");
-            return;
-        }
-        rtt_puts("C");
-
-        // Calculate staging flash address
-        uint32_t staging_addr = OTA_STAGING_ADDR + block_id * OTA_SECTOR_SIZE;
-        uint32_t data_offset = BLOCK_HEADER_SIZE;  // Skip BlockData header
-
-        // Erase staging sector
-        rtt_puts("E");
-        uint32_t rc = staging_erase_sector(staging_addr);
-        if (rc != FAPI_STATUS_SUCCESS) {
-            rtt_puts("!\r\nOTA: erase fail s=");
-            rtt_put_hex8((uint8_t)block_id);
-            rtt_puts("\r\n");
-            return;
-        }
-
-        // Program staging sector
-        rtt_puts("P");
-        rc = staging_program(&bw_buf[data_offset], staging_addr, data_len);
-        if (rc != FAPI_STATUS_SUCCESS) {
-            rtt_puts("!\r\nOTA: prog fail s=");
-            rtt_put_hex8((uint8_t)block_id);
-            rtt_puts("\r\n");
-            return;
-        }
-
-        // Verify flash write (cache can't see the write; invalidate first)
-        rtt_puts("V");
-        vims_invalidate();
-        if (!staging_verify(staging_addr, &bw_buf[data_offset], data_len)) {
-            rtt_puts("!\r\nOTA: verify fail s=");
-            rtt_put_hex8((uint8_t)block_id);
-            rtt_puts("\r\n");
-            return;
-        }
-
-        rtt_puts("+ ");
-    }
+    if (!oepl_ota_stage_download(info, OTA_STAGING_ADDR, OTA_STAGING_SIZE)) return;
 
     // Final integrity check: verify the vector table in staging.
     // Valid ARM Cortex-M firmware has its initial SP inside SRAM and a reset

@@ -14,6 +14,7 @@
 #include "drivers/oepl_display_driver_uc8159_600x448.h"
 #include "splash.h"
 #include "oepl_ota_cc2630.h"
+#include "inflate.h"
 #include "fault.h"
 
 // TI driverlib
@@ -468,6 +469,246 @@ static void bwr_to_4bpp(uint8_t bw, uint8_t red, uint8_t out[4])
     }
 }
 
+// --- Stack high-water mark ---
+// The stack is whatever sits between .noinit and the top of SRAM, and the
+// zlib decoder made that margin worth watching. Paint it at cold boot, scan
+// it at each check-in: the figure only ever falls, and it survives standby
+// (SRAM is retained and the wake path does not reset SP).
+extern uint32_t _enoinit;
+#define STACK_PAINT 0x5A5A5A5AUL
+
+static void stack_paint(void)
+{
+    uint32_t *sp;
+    __asm volatile ("mov %0, sp" : "=r" (sp));
+    for (uint32_t *p = &_enoinit; p < sp - 16; p++) *p = STACK_PAINT;
+}
+
+// Bytes of stack that have never been touched.
+static uint32_t stack_free(void)
+{
+    uint32_t *p = &_enoinit;
+    while (*p == STACK_PAINT) p++;
+    return (uint32_t)((uint8_t *)p - (uint8_t *)&_enoinit);
+}
+
+// Open the panel for pixel data: DTM1 (cmd 0x10), then hold CS for the rows.
+static void epd_begin_pixels(void)
+{
+    oepl_hw_gpio_set(15, false);  // DC = command
+    oepl_hw_spi_cs_assert();
+    { uint8_t c = 0x10; oepl_hw_spi_send_raw(&c, 1); }
+    oepl_hw_gpio_set(15, true);   // DC = data
+}
+
+// --- Compressed images (DATATYPE_IMG_ZLIB) ---
+//
+// The AP compresses pictures for any tag reporting a firmware version at or
+// above the threshold in its tagtypes/35.json ("zlib_compression": "27", read
+// as hex, so 39). The payload is a 4-byte uncompressed length followed by a
+// zlib stream (4 KB window — the AP's miniz is built with a 4 KB dictionary
+// and stamps CINFO=4) whose content is a 6-byte header, then plane 1, then
+// plane 2 for a red image.
+//
+// Nothing here fits in RAM, so the compressed image is staged in flash the
+// same way firmware is, then decoded straight out of it. Plane 1 goes back to
+// flash because the panel wants the two planes interleaved as 4bpp pixels and
+// the stream delivers them one after the other; plane 2 is interleaved
+// against it row by row as it decodes, so the panel is fed in one pass.
+#define IMG_ZLIB_IN_ADDR    OTA_STAGING_ADDR              // sectors 16-20
+#define IMG_ZLIB_IN_MAX     (5UL * OTA_SECTOR_SIZE)       // 20 KB of input
+#define IMG_PLANE1_ADDR     (OTA_STAGING_ADDR + IMG_ZLIB_IN_MAX)   // sectors 21-29
+#define IMG_PLANE1_MAX      (9UL * OTA_SECTOR_SIZE)       // 36 KB >= 33600
+
+struct zlib_sink {
+    uint32_t off;              // absolute offset in the decompressed stream
+    uint32_t plane_size;       // bytes per plane
+    uint8_t  hdr[6];
+    uint8_t  planes;
+    bool     header_done;
+    bool     panel_open;
+    bool     failed;
+    // plane 1 -> flash, programmed in chunks as it arrives
+    uint32_t p1_addr;          // next flash address to program
+    uint8_t  chunk[256];
+    uint16_t chunk_len;
+    // plane 2 -> panel, a row at a time against plane 1 read back from flash
+    uint8_t  row[DISPLAY_WIDTH_600X448 / 8];
+    uint16_t row_len;
+    uint16_t row_y;
+};
+
+static struct zlib_sink zsink;
+
+static bool zsink_flush_chunk(void)
+{
+    if (zsink.chunk_len == 0) return true;
+    if ((zsink.p1_addr & (OTA_SECTOR_SIZE - 1)) == 0) {
+        if (oepl_flash_erase_sector(zsink.p1_addr) != 0) return false;
+    }
+    if (oepl_flash_program(zsink.chunk, zsink.p1_addr, zsink.chunk_len) != 0) return false;
+    zsink.p1_addr += zsink.chunk_len;
+    zsink.chunk_len = 0;
+    return true;
+}
+
+// One row of plane 2 has arrived: pair it with the same row of plane 1 (from
+// flash) and push 4bpp pixels at the panel.
+static void zsink_emit_row(void)
+{
+    static uint8_t row_4bpp[DISPLAY_WIDTH_600X448 / 2];
+    const uint8_t *bw = (const uint8_t *)(IMG_PLANE1_ADDR +
+                                          (uint32_t)zsink.row_y * (DISPLAY_WIDTH_600X448 / 8));
+    for (uint16_t x = 0; x < DISPLAY_WIDTH_600X448 / 8; x++) {
+        uint8_t b = (zsink.planes == 2) ? bw[x] : zsink.row[x];
+        uint8_t r = (zsink.planes == 2) ? zsink.row[x] : 0;
+        bwr_to_4bpp(b, r, &row_4bpp[x * 4]);
+    }
+    oepl_hw_spi_send_raw(row_4bpp, sizeof(row_4bpp));
+    zsink.row_y++;
+    zsink.row_len = 0;
+    if ((zsink.row_y & 0x3F) == 0) rtt_puts(".");
+}
+
+// Called by the decoder with each run of decompressed bytes, in order.
+static bool zlib_sink(void *ctx, const uint8_t *data, uint32_t len)
+{
+    (void)ctx;
+    const uint16_t row_bytes = DISPLAY_WIDTH_600X448 / 8;
+
+    while (len && !zsink.failed) {
+        // 1. the 6-byte image header
+        if (!zsink.header_done) {
+            zsink.hdr[zsink.off] = *data++;
+            len--;
+            if (++zsink.off < sizeof(zsink.hdr)) continue;
+
+            uint16_t w = (uint16_t)(zsink.hdr[1] | (zsink.hdr[2] << 8));
+            uint16_t h = (uint16_t)(zsink.hdr[3] | (zsink.hdr[4] << 8));
+            zsink.planes = zsink.hdr[5];
+            rtt_puts("ZIMG: ");
+            rtt_put_hex32(((uint32_t)w << 16) | h);
+            rtt_puts(" planes=");
+            rtt_put_hex8(zsink.planes);
+            rtt_puts("\r\n");
+            if (zsink.hdr[0] != sizeof(zsink.hdr) || w != DISPLAY_WIDTH_600X448 ||
+                h != DISPLAY_HEIGHT_600X448 || (zsink.planes != 1 && zsink.planes != 2)) {
+                rtt_puts("ZIMG: header mismatch\r\n");
+                zsink.failed = true;
+                return false;
+            }
+            zsink.plane_size = (uint32_t)row_bytes * DISPLAY_HEIGHT_600X448;
+            if (zsink.planes == 2 && zsink.plane_size > IMG_PLANE1_MAX) {
+                zsink.failed = true;
+                return false;
+            }
+            zsink.header_done = true;
+            zsink.p1_addr = IMG_PLANE1_ADDR;
+            // A one-plane image goes straight at the panel, so open it now;
+            // a two-plane image waits until plane 1 has been stored.
+            if (zsink.planes == 1) {
+                epd_begin_pixels();
+                zsink.panel_open = true;
+            }
+            continue;
+        }
+
+        uint32_t img_off = zsink.off - sizeof(zsink.hdr);
+
+        // 2. plane 1: to flash for a red image, to the panel for a plain one
+        if (img_off < zsink.plane_size && zsink.planes == 2) {
+            uint32_t n = zsink.plane_size - img_off;
+            if (n > len) n = len;
+            for (uint32_t i = 0; i < n; i++) {
+                zsink.chunk[zsink.chunk_len++] = data[i];
+                if (zsink.chunk_len == sizeof(zsink.chunk) && !zsink_flush_chunk()) {
+                    rtt_puts("ZIMG: plane1 flash write failed\r\n");
+                    zsink.failed = true;
+                    return false;
+                }
+            }
+            data += n; len -= n; zsink.off += n;
+            if (zsink.off - sizeof(zsink.hdr) == zsink.plane_size) {
+                if (!zsink_flush_chunk()) { zsink.failed = true; return false; }
+                oepl_flash_cache_invalidate();   // about to read plane 1 back
+                epd_begin_pixels();
+                zsink.panel_open = true;
+            }
+            continue;
+        }
+
+        // 3. the plane the panel is fed from, a row at a time
+        uint32_t n = len;
+        for (uint32_t i = 0; i < n; i++) {
+            zsink.row[zsink.row_len++] = data[i];
+            if (zsink.row_len == row_bytes) {
+                if (zsink.row_y >= DISPLAY_HEIGHT_600X448) {
+                    zsink.failed = true;
+                    return false;
+                }
+                zsink_emit_row();
+            }
+        }
+        data += n; len -= n; zsink.off += n;
+    }
+    return !zsink.failed;
+}
+
+// Stage a compressed image in flash, decode it into the panel, refresh.
+// Returns true only if the whole stream decoded and checksummed.
+static bool download_and_display_zlib(struct AvailDataInfo *info)
+{
+    rtt_puts("ZIMG: staging ");
+    rtt_put_hex32(info->dataSize);
+    rtt_puts(" bytes\r\n");
+
+    if (!oepl_ota_stage_download(info, IMG_ZLIB_IN_ADDR, IMG_ZLIB_IN_MAX))
+        return false;
+
+    oepl_flash_cache_invalidate();
+    const uint8_t *in = (const uint8_t *)IMG_ZLIB_IN_ADDR;
+    uint32_t total = (uint32_t)in[0] | ((uint32_t)in[1] << 8) |
+                     ((uint32_t)in[2] << 16) | ((uint32_t)in[3] << 24);
+
+    memset(&zsink, 0, sizeof(zsink));
+
+    rtt_puts("EPD wake...");
+    uc8159_wake();
+    rtt_puts("OK\r\n");
+
+    uint32_t produced = 0;
+    // red_buf is the decoder's 4 KB window: nothing else needs it here, and a
+    // second 4 KB buffer would not fit in RAM.
+    int rc = inflate_zlib(in + 4, info->dataSize - 4, red_buf, 4096,
+                          zlib_sink, NULL, total, &produced);
+
+    if (zsink.panel_open) oepl_hw_spi_cs_deassert();
+
+    if (rc != INFLATE_OK || zsink.failed || zsink.row_y != DISPLAY_HEIGHT_600X448) {
+        rtt_puts("\r\nZIMG: decode failed rc=");
+        rtt_put_hex8((uint8_t)(-rc));
+        rtt_puts(" rows=");
+        rtt_put_hex32(zsink.row_y);
+        rtt_puts(" out=");
+        rtt_put_hex32(produced);
+        rtt_puts(" -- not refreshing\r\n");
+        uc8159_sleep();
+        return false;
+    }
+
+    rtt_puts("\r\nZIMG: decoded ");
+    rtt_put_hex32(produced);
+    rtt_puts(" bytes, checksum OK\r\n");
+
+    // Refresh first, then tell the AP: transmitting during the refresh's peak
+    // current loses the frame (see download_and_display).
+    uc8159_refresh_and_sleep();
+    rtt_puts(oepl_radio_send_xfer_complete()
+                 ? "XferComplete ACKed\r\n"
+                 : "XferComplete NOT acked (AP will re-offer)\r\n");
+    return true;
+}
+
 // Download image and stream to display.
 // On block download failure, fills with white and continues instead of aborting.
 // Returns true if image was displayed (even partially).
@@ -501,11 +742,7 @@ static bool download_and_display(struct AvailDataInfo *info)
     uc8159_wake();
     rtt_puts("OK\r\n");
 
-    // Open display for pixel data: DTM1 (cmd 0x10) in one CS frame
-    oepl_hw_gpio_set(15, false);  // DC = command
-    oepl_hw_spi_cs_assert();
-    { uint8_t c = 0x10; oepl_hw_spi_send_raw(&c, 1); }
-    oepl_hw_gpio_set(15, true);   // DC = data
+    epd_begin_pixels();
 
     // Stream rows to display
     uint8_t bw_line[75];
@@ -653,6 +890,8 @@ int main(void)
     rtt_puts(" WARM=");
     rtt_put_hex8(warm_boot ? 1 : 0);
     rtt_puts("\r\n");
+
+    if (!warm_boot) stack_paint();
 
     // Watchdog: from here on anything that hangs for ~90s gets reset.
     oepl_hw_wdt_init();
@@ -866,6 +1105,8 @@ int main(void)
     uint64_t xfer_hold_ver = 0;        // the dataVer that earned the hold
     uint8_t xfer_fail_streak = 0;
     while (1) {
+        rtt_puts("\r\nstack free=");
+        rtt_put_hex32(stack_free());
         rtt_puts("\r\n=== Checkin #");
         rtt_put_hex32(checkin_count);
         rtt_puts(" ===\r\n");
@@ -946,7 +1187,9 @@ int main(void)
 #ifdef BENCH_FORCE_XFER_FAIL
                 bool shown = false;
 #else
-                bool shown = download_and_display(&info);
+                bool shown = (info.dataType == DATATYPE_IMG_ZLIB)
+                                 ? download_and_display_zlib(&info)
+                                 : download_and_display(&info);
 #endif
                 if (shown) {
                     rtt_puts("*** IMAGE DISPLAYED ***\r\n");
