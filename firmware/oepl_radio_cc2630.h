@@ -73,13 +73,15 @@
 // ~30x smaller on the air. Dropping back below 39 is the way to ask the AP
 // for raw images again if the decoder ever needs to be bypassed.
 #if defined(DIAG_TELEMETRY)
-#define TAG_FW_VERSION  (0x8000 | 0x002B)
+#define TAG_FW_VERSION  (0x8000 | 0x002C)
 #else
-#define TAG_FW_VERSION  0x002B
+#define TAG_FW_VERSION  0x002C
 #endif
 
 // Capabilities
 #define CAPABILITY_SUPPORTS_COMPRESSION  0x02
+#define CAPABILITY_HAS_NFC               0x40
+#define CAPABILITY_NFC_WAKE              0x80
 
 // Data types
 #define DATATYPE_NOUPDATE       0x00
@@ -87,6 +89,8 @@
 #define DATATYPE_IMG_RAW_1BPP   0x20
 #define DATATYPE_IMG_RAW_2BPP   0x21
 #define DATATYPE_IMG_ZLIB       0x30   // zlib-compressed, 4 KB window
+#define DATATYPE_NFC_RAW_CONTENT 0xA0  // raw NDEF bytes for the NFC chip
+#define DATATYPE_NFC_URL_DIRECT  0xA1  // URL, tag builds the NDEF record
 
 // --- Protocol Structs (packed, little-endian on wire) ---
 

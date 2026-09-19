@@ -266,6 +266,42 @@ filtered, `full` dropped for lack of a free RX entry). A boot after a crash
 prints `LAST FAULT: PC=...` (PC `DEAD0DB0` = RF doorbell hang) and the first
 check-in carries the fault class/detail (see "Reading a crash capture").
 
+## NFC
+
+The board carries a passive NFC Type-2 tag chip (NXP NTAG I2C family) with its
+own coil, separate from the 2.4 GHz antenna. It has no transmitter: a reader
+powers it from its own field, so **it answers a phone even when the tag's
+battery is flat or its firmware is broken** — confirmed on a bricked tag.
+
+```
+DIO24 = SDA, DIO25 = SCL, address 0x55, 16-byte blocks
+DIO21 = FD (field detect), open-drain, pulses LOW while a reader's field is on
+DIO5  = shared peripheral power (panel *and* NFC); only needed for I2C access
+```
+
+`firmware/oepl_nfc_cc2630.c` handles it. Block 0 (UID, capability container,
+the chip's own I2C address) is never written; user memory starts at block 1.
+
+- **On every cold boot** the tag writes its own identity — `OEPL <mac> v<ver>
+  <volts>` as an NDEF text record — so tapping a tag that has gone quiet still
+  says what it is.
+- **The AP can push content.** OEPL's web UI offers content mode 14, "Set NFC
+  URL", to any tag reporting `CAPABILITY_HAS_NFC` (0x40) — which is why it
+  never appeared before, since this firmware used to report no capabilities at
+  all. The AP sends `DATATYPE_NFC_RAW_CONTENT` (0xA0), whose payload is a
+  finished NDEF TLV that the tag copies straight in; `DATATYPE_NFC_URL_DIRECT`
+  (0xA1) sends a bare URL and the tag builds the record.
+- Boards without the chip populated (it is a per-variant option) simply report
+  no capability and skip all of it — `oepl_nfc_init()` returns false.
+
+Verified 2026-09-19: identity record read by a phone, then a URL pushed from
+the AP (`contentmode 14`) and opened by the phone. Field detect was confirmed
+by watching DIO21 while a phone was held to the coil — it pulsed low on each
+read, which is what `CAPABILITY_NFC_WAKE` would build on.
+
+Sleep current is unaffected: the shared rail is raised only for the
+milliseconds of I2C traffic and dropped again.
+
 ## Board pin map (recovered from the stock firmware)
 
 Read out of `reference/stock.bin` (TI-RTOS PIN/SPI/I2C/UART driver tables at

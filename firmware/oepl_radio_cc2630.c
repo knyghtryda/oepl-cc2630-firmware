@@ -13,6 +13,7 @@
 #include "oepl_radio_cc2630.h"
 #include "oepl_rf_cc2630.h"
 #include "oepl_hw_abstraction_cc2630.h"
+#include "oepl_nfc_cc2630.h"
 #include "rf_mailbox.h"
 #include "rtt.h"
 #include <string.h>
@@ -217,7 +218,9 @@ bool oepl_radio_checkin(struct AvailDataInfo *out_info)
 #endif
     req->hwType = HW_TYPE;
     req->wakeupReason = g_wakeup_reason;
-    req->capabilities = 0;
+    // Tell the AP the board has an NFC chip, which is what unlocks its
+    // "Set NFC URL" content mode (it checks for capability bit 0x40).
+    req->capabilities = oepl_nfc_present() ? CAPABILITY_HAS_NFC : 0;
     req->tagSoftwareVersion = TAG_FW_VERSION;
     req->currentChannel = radio_st.current_channel;
     req->customMode = 0;

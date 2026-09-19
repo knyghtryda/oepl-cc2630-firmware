@@ -15,6 +15,7 @@
 #include "splash.h"
 #include "oepl_ota_cc2630.h"
 #include "inflate.h"
+#include "oepl_nfc_cc2630.h"
 #include "fault.h"
 
 // TI driverlib
@@ -494,6 +495,7 @@ static uint32_t stack_free(void)
     return (uint32_t)((uint8_t *)p - (uint8_t *)&_enoinit);
 }
 
+
 // Open the panel for pixel data: DTM1 (cmd 0x10), then hold CS for the rows.
 static void epd_begin_pixels(void)
 {
@@ -711,6 +713,98 @@ static bool download_and_display_zlib(struct AvailDataInfo *info)
     return true;
 }
 
+// --- NFC content from the AP ---
+//
+// OEPL's web UI offers "Set NFC URL" (content mode 14) to any tag that
+// reports CAPABILITY_HAS_NFC, and sends the result as DATATYPE_NFC_RAW_CONTENT:
+// the bytes are already a finished NDEF TLV (03 <len> D1 01 <len> 55 <prefix>
+// <url> FE), so the tag just copies them into the chip's user memory.
+// DATATYPE_NFC_URL_DIRECT hands over a bare URL instead and leaves the record
+// to us.
+static bool download_and_write_nfc(struct AvailDataInfo *info)
+{
+    if (!oepl_nfc_present()) {
+        rtt_puts("NFC: content offered but no chip here\r\n");
+        return false;
+    }
+    uint32_t len = info->dataSize;
+    if (len == 0 || len > BLOCK_DATA_SIZE) {
+        rtt_puts("NFC: content size out of range\r\n");
+        return false;
+    }
+
+    bw_cache_id = -1;
+    if (!ensure_bw_block(0, info)) {
+        rtt_puts("NFC: download failed\r\n");
+        return false;
+    }
+    const uint8_t *payload = &bw_buf[BLOCK_HEADER_SIZE];
+
+    bool ok;
+    if (info->dataType == DATATYPE_NFC_URL_DIRECT) {
+        // bare URL: wrap it in a URI record ourselves (prefix byte 0 = none)
+        uint8_t rec[BLOCK_DATA_SIZE > 256 ? 256 : BLOCK_DATA_SIZE];
+        if (len + 9 > sizeof(rec)) return false;
+        uint16_t n = 0;
+        rec[n++] = 0x03;
+        rec[n++] = (uint8_t)(len + 5);
+        rec[n++] = 0xD1;
+        rec[n++] = 0x01;
+        rec[n++] = (uint8_t)(len + 1);
+        rec[n++] = 0x55;              // URI record
+        rec[n++] = 0x00;              // no prefix substitution
+        for (uint32_t i = 0; i < len; i++) rec[n++] = payload[i];
+        rec[n++] = 0xFE;
+        ok = oepl_nfc_write_user(rec, n);
+    } else {
+        ok = oepl_nfc_write_user(payload, (uint16_t)len);
+    }
+
+    if (ok) {
+        rtt_puts("NFC: content written\r\n");
+        rtt_puts(oepl_radio_send_xfer_complete()
+                     ? "XferComplete ACKed\r\n"
+                     : "XferComplete NOT acked (AP will re-offer)\r\n");
+    } else {
+        rtt_puts("NFC: write failed\r\n");
+    }
+    return ok;
+}
+
+// Put the tag's own identity in the chip, so tapping an unresponsive or flat
+// tag still says what it is. The chip answers from the reader's field alone.
+static void nfc_write_identity(void)
+{
+    if (!oepl_nfc_present()) return;
+
+    uint8_t mac[8];
+    oepl_rf_get_mac(mac);
+    int8_t tc = 0;
+    uint16_t mv = 0;
+    oepl_hw_get_temperature(&tc);
+    oepl_hw_get_voltage(&mv);
+
+    static const char hexd[] = "0123456789ABCDEF";
+    char text[64];
+    char *q = text;
+    const char *p = "OEPL ";
+    while (*p) *q++ = *p++;
+    for (int i = 7; i >= 0; i--) { *q++ = hexd[mac[i] >> 4]; *q++ = hexd[mac[i] & 15]; }
+    p = "  v";
+    while (*p) *q++ = *p++;
+    *q++ = (char)('0' + ((TAG_FW_VERSION & 0xFF) / 10));
+    *q++ = (char)('0' + ((TAG_FW_VERSION & 0xFF) % 10));
+    *q++ = ' '; *q++ = ' ';
+    *q++ = (char)('0' + (mv / 1000)); *q++ = '.';
+    *q++ = (char)('0' + ((mv / 100) % 10));
+    *q++ = (char)('0' + ((mv / 10) % 10));
+    *q++ = 'V';
+
+    uint8_t rec[96];
+    uint16_t n = oepl_nfc_make_text(rec, sizeof(rec), text, (uint8_t)(q - text));
+    if (n) oepl_nfc_write_user(rec, n);
+}
+
 // Download image and stream to display.
 // On block download failure, fills with white and continues instead of aborting.
 // Returns true if image was displayed (even partially).
@@ -893,6 +987,7 @@ int main(void)
     rtt_put_hex8(warm_boot ? 1 : 0);
     rtt_puts("\r\n");
 
+
     if (!warm_boot) stack_paint();
 
 
@@ -1048,6 +1143,9 @@ int main(void)
     // which costs far more than deep power-down on a typical SPI NOR.
     oepl_hw_flash_deep_sleep();
 #endif
+
+    // --- NFC chip (a per-variant option; absent boards just skip it) ---
+    if (!warm_boot && oepl_nfc_init()) nfc_write_identity();
 
     // --- Initialize RF core ---
     rf_status_t rc = oepl_rf_init();
@@ -1222,9 +1320,15 @@ int main(void)
 #ifdef BENCH_FORCE_XFER_FAIL
                 bool shown = false;
 #else
-                bool shown = (info.dataType == DATATYPE_IMG_ZLIB)
-                                 ? download_and_display_zlib(&info)
-                                 : download_and_display(&info);
+                bool shown;
+                if (info.dataType == DATATYPE_NFC_RAW_CONTENT ||
+                    info.dataType == DATATYPE_NFC_URL_DIRECT) {
+                    shown = download_and_write_nfc(&info);
+                } else if (info.dataType == DATATYPE_IMG_ZLIB) {
+                    shown = download_and_display_zlib(&info);
+                } else {
+                    shown = download_and_display(&info);
+                }
 #endif
                 if (shown) {
                     rtt_puts("*** IMAGE DISPLAYED ***\r\n");

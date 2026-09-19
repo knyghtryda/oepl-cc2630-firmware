@@ -38,6 +38,7 @@ SOURCES = \
 	$(DRIVERS_DIR)/oepl_display_driver_uc8159_600x448.c \
 	$(FIRMWARE_DIR)/splash.c \
 	$(FIRMWARE_DIR)/oepl_ota_cc2630.c \
+	$(FIRMWARE_DIR)/oepl_nfc_cc2630.c \
 	$(FIRMWARE_DIR)/inflate.c \
 	$(FIRMWARE_DIR)/main.c
 

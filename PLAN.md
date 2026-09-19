@@ -185,7 +185,18 @@ Most findings were already fixed and measured in v0.19/v0.20; PRs are superseded
       Daily budget 1.54 → **0.83 mAh**, i.e. ~6 years on 4x CR2450, where cell self-discharge
       starts to matter as much as the tag. Updates are now 71% of the budget.
 
+- [x] **NFC** (2026-09-19, v0.30). The second antenna turned out to be an NFC coil with a
+      passive NTAG I2C chip on DIO24/25 — no second transmitter. The tag now writes its own
+      identity there at cold boot and accepts AP-pushed content, so OEPL's "Set NFC URL"
+      content mode works on these tags for the first time. Verified by phone: identity record,
+      then a pushed URL that opened.
+
 ## Follow-ups (not blocking)
+
+- **NFC wake** (`CAPABILITY_NFC_WAKE`, `WAKEUP_REASON_NFC`): DIO21 is the chip's field-detect
+  pin, open-drain, confirmed pulsing low while a phone reads the coil (2026-09-19). Waking the
+  tag on a tap would need it configured as an AON edge wake source. Unknown: whether the pulse
+  is long enough to catch reliably, and what it costs in standby to keep the input armed.
 
 - [x] **Radio link margin** — answered 2026-09-19, and it was not sensitivity. With the tag
       shielded to ~−74 dBm, 28% of check-ins failed because the AP never heard the request
