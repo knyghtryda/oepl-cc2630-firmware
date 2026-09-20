@@ -777,6 +777,17 @@ static void nfc_write_identity(void)
 {
     if (!oepl_nfc_present()) return;
 
+    // Don't overwrite content the AP pushed. "Set NFC URL" writes a URI
+    // record (type 'U', 0x55) that is meant to outlive a reboot -- the chip
+    // is non-volatile, so a tag can be given a URL once and put back into
+    // display mode. Only an empty chip or our own text record gets replaced.
+    uint8_t blk[NFC_BLOCK_SIZE];
+    if (oepl_nfc_read_block(NFC_FIRST_USER_BLK, blk) &&
+        blk[0] == 0x03 && blk[5] == 0x55) {
+        rtt_puts("NFC: leaving the URL the AP pushed\r\n");
+        return;
+    }
+
     uint8_t mac[8];
     oepl_rf_get_mac(mac);
     int8_t tc = 0;
