@@ -2,6 +2,13 @@
 build/
 binaries/
 
+# Vendor firmware dumps: needed locally for analysis, not ours to redistribute.
+# See reference/README.md. stock_ccfg.bin is the 88-byte hardware config block
+# and is kept — it is register values, not code.
+reference/*.bin
+reference/*.elf
+!reference/stock_ccfg.bin
+
 # Large disassembly/listing files (generate locally with Ghidra)
 *.txt.tool
 *_listing.txt

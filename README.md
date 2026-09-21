@@ -63,7 +63,7 @@ oepl-cc2630-firmware/
 │       └── oepl_display_driver_uc8159_600x448.c/h  UC8159 display driver
 ├── binaries/             Pre-built firmware binary
 ├── docs/                 Analysis and development documentation
-├── reference/            Stock firmware binaries and OEPL reference binary
+├── reference/            Notes on the vendor dumps (binaries not distributed)
 └── tools/                Utility scripts
     ├── ap.py             AP helper: OTA push, image push, poll tag state, decode fault/diag reports
     ├── ap_log.py         Stream the AP's live log (block requests, xfer complete, timeouts)
@@ -228,5 +228,5 @@ sign of a real bug.
 ## Based On
 
 - [OpenEPaperLink](https://github.com/OpenEPaperLink/OpenEPaperLink) project
-- CC2630 OEPL alpha firmware (reference binary in `reference/`)
+- CC2630 OEPL alpha firmware (analysed locally; see `reference/README.md`)
 - TG-GR6000N stock firmware (display init sequence extracted via Ghidra)

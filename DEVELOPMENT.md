@@ -309,7 +309,7 @@ milliseconds of I2C traffic and dropped again.
 
 ## Board pin map (recovered from the stock firmware)
 
-Read out of `reference/stock.bin` (TI-RTOS PIN/SPI/I2C/UART driver tables at
+Read out of a stock-firmware dump (TI-RTOS PIN/SPI/I2C/UART driver tables at
 0xEAA8/0xEB50/0xEB9C/0xEB10) on 2026-09-19, and spot-checked against the
 binary by hand. Our firmware uses only the panel and flash pins; the rest is
 recorded here because it answers several long-standing unknowns.
@@ -508,7 +508,7 @@ standby, and the tag's own supply reading fell to 2203 mV, so those pins draw
 current while awake). Powering the external flash down does matter: ~4 µA,
 and it is now done on every boot rather than only a cold one.
 
-The stock firmware was disassembled to compare (`reference/stock.bin`, TI-RTOS
+The stock firmware was disassembled to compare (a local dump, TI-RTOS
 + PowerCC26XX): its CCFG is byte-identical to ours, it uses the same DC/DC
 settings and the same standby sequence, and it has nothing in that sequence we
 lack — the difference was entirely in pin configuration.
