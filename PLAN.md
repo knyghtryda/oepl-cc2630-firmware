@@ -82,6 +82,8 @@ Findings on the bench (Weather6, `00124B0018177B31`, RSSI −67, AP 192.168.5.4)
 - [x] v0.16: no panel power-on at boot (was left powered through every sleep); AP `maxsleep=30`,
       `stopsleep=0`; automation `ttl: 7200` → Weather6 checks in every 30 min instead of every minute.
 - [ ] Battery life on a fresh set with 12 refreshes/day — watch `batteryMv` in the AP DB.
+      Open by nature: the estimate is now ~6 years (0.83 mAh/day), so this is a long-run
+      observation rather than a task. Weather6 has been the reference tag since 2026-09-13.
       First-principles estimate if standby is real: ~9 mAh/day → 5–8 months (see DEVELOPMENT.md).
 - [x] Bench: PPK2 as supply/meter, J-Link flashing with readback verify, RTT, scripted
       flash → power-cycle → measure loop (2026-09-16).
@@ -125,9 +127,13 @@ Most findings were already fixed and measured in v0.19/v0.20; PRs are superseded
       unaffected (89.7% yield in the same run).
 - [x] H1/M2: Makefile header deps, flags stamp, link deps — verified (no-op, header touch, flag change)
 - [x] OTA robustness (H8, M14, M15, L19–L22) — v0.24, bench-verified 2026-09-18 (see Next)
-- [ ] M21: OEPL channel 27 isn't valid for CMD_IEEE_RX (only matters on an AP set to 27)
-- [ ] Radio configs at the real edge (−77 dBm or worse) if a spot like that is available.
-- [ ] Identify the remaining ~59 µA from the board photo.
+- [x] M21: OEPL channel 27 isn't valid for CMD_IEEE_RX — fixed in v0.22, documented in
+      DEVELOPMENT.md ("the channel-27 trap") and README
+- [x] Radio configs at the real edge — done 2026-09-19 with the tag shielded to ≈−74 dBm.
+      No config differs significantly; the failures were uplink, not sensitivity. See
+      DEVELOPMENT.md, "Radio: what limits a marginal link"
+- [x] Identify the remaining ~59 µA — done 2026-09-18: the panel's DC and DIR lines were
+      floating. Sleep floor is now 9.1 µA
 
 ## Next
 

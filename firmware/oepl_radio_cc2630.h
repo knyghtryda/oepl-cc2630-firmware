@@ -73,9 +73,9 @@
 // ~30x smaller on the air. Dropping back below 39 is the way to ask the AP
 // for raw images again if the decoder ever needs to be bypassed.
 #if defined(DIAG_TELEMETRY)
-#define TAG_FW_VERSION  (0x8000 | 0x002C)
+#define TAG_FW_VERSION  (0x8000 | 0x002D)
 #else
-#define TAG_FW_VERSION  0x002C
+#define TAG_FW_VERSION  0x002D
 #endif
 
 // Capabilities
