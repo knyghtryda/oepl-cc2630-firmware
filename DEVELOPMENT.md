@@ -371,21 +371,51 @@ wrongly collapsed two of them into one. For the record:
 
 | where | what |
 |---|---|
-| below the processor, ~20.1 mm trace | the 2.4 GHz radio — assumed, not yet proven |
-| back side, slightly left of centre | a multi-turn coil — this is the NFC antenna |
-| top left, ~17.3 mm trace, own 8-pad IC marked `S92` / `742` | **unidentified** |
+| below the processor, ~20.1 mm trace | 2.4 GHz radio |
+| back side, slightly left of centre | a multi-turn coil — the NFC antenna |
+| top left, ~17.3 mm trace, own 8-pad IC marked `S92` / `742` | coupled to the radio, purpose unknown |
 
 The NFC chip is real and works — we read its UID over I²C, write NDEF to it and
 a phone reads it back — and 13.56 MHz needs a multi-turn loop, which is the
-back-side coil, not a short straight trace. So the top-left antenna and its own
-IC remain unexplained. It is *not* the NFC coil, and the claim that it was is
-withdrawn.
+back-side coil, not a short straight trace. So the top-left antenna is *not*
+the NFC coil, and an earlier claim here that it was is withdrawn.
 
-What would settle it, cheaply: continuity from the NTAG chip's LA/LB pins to
-the back-side coil (confirming the pairing), and a detune test — hold a finger
-or a grounded object against each trace antenna in turn while watching the
-tag's reported RSSI. The antenna the radio actually uses will move; the others
-will not.
+#### Detune test (2026-09-21)
+
+Finger held flat against each antenna in turn while logging the RSSI the AP
+reports for the tag, ~31 s per sample, on the bench tag at v46.
+
+| phase | samples (dBm) | vs untouched |
+|---|---|---|
+| untouched | −72 −72 −72 −73 −75 −76 −72 −74 −73 | — |
+| **control**: finger on the board, away from both antennas | −77 −76 −77 −77 | **−4 dB** |
+| top-left antenna | −81 −84 −85 −86 −84 | **−11 dB** |
+| bottom antenna | −82 −86 −85 −87 | **−12 dB** |
+
+The control is the point of the experiment. A hand near a 2.4 GHz tag absorbs
+regardless of what it touches, and without measuring that you cannot tell
+detuning from proximity — it is worth about 4 dB here. Touching either antenna
+costs a further 7–8 dB on top of it, and both recover fully on release.
+
+**So both trace antennas are electrically coupled to the radio.** That rules
+out the obvious reading — that the top-left one belongs to some separate
+subsystem with its own transceiver. What it does not say is how they are
+coupled. Three candidates, in rough order of likelihood:
+
+1. **Same net.** The top-left is an alternate antenna footprint wired in
+   parallel, probably a per-variant option left populated here.
+2. **Parasitic element.** An unfed director or reflector close enough to couple
+   and shape the pattern. The length ratio is suggestive: parasitic elements are
+   deliberately a few percent shorter than the driven element, and 17.3 mm
+   against 20.1 mm is about right.
+3. **Switched front end.** The `S92` IC is an RF switch or front-end module
+   selecting between the two antennas — real antenna diversity.
+
+DC continuity on a dead board separates these: antenna-to-antenna, top-left to
+the `S92` pads, and each antenna to the CC2630's RF pin. Hypothesis 2 is the one
+that shows no DC connection anywhere. Note that a shunt-to-ground inductor at
+the feed is common, so a low reading to ground is not by itself evidence of a
+short between the two.
 
 ### Other consequences
 

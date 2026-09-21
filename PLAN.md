@@ -199,15 +199,19 @@ Most findings were already fixed and measured in v0.19/v0.20; PRs are superseded
 
 ## Follow-ups (not blocking)
 
-- **The top-left antenna is still unidentified** (reopened 2026-09-21). The board has
-  *three* antennas, not two: the ~20.1 mm trace below the processor (assumed to be the
-  2.4 GHz radio), the multi-turn coil on the back (the NFC chip's, confirmed working), and
-  a ~17.3 mm trace in the top-left corner with its own 8-pad IC marked `S92` / `742`. The
-  v0.30 note claiming the top-left antenna was the NFC coil was wrong and is withdrawn:
-  13.56 MHz needs a loop, not a short straight trace. Two cheap tests would settle it —
-  continuity from the NTAG's LA/LB pins to the back coil, and a detune test (hold a finger
-  against each trace antenna in turn while watching reported RSSI; only the one the radio
-  uses will move).
+- **The top-left antenna: coupled to the radio, purpose still unknown** (2026-09-21).
+  The board has *three* antennas, not two: the ~20.1 mm trace below the processor, the
+  multi-turn coil on the back (the NFC chip's, confirmed working), and a ~17.3 mm trace in
+  the top-left corner with its own 8-pad IC marked `S92` / `742`. The v0.30 note claiming
+  the top-left antenna was the NFC coil was wrong and is withdrawn: 13.56 MHz needs a loop,
+  not a short straight trace.
+  **Detune test done** (see DEVELOPMENT.md): finger on the bottom antenna costs 12 dB,
+  finger on the top-left costs 11 dB, and the control — a finger on the board away from
+  both — costs only 4 dB, so hand proximity does not explain it. Both trace antennas are
+  electrically coupled to the 2.4 GHz radio, which rules out the top-left belonging to a
+  separate transceiver. Remaining hypotheses: same net (parallel footprint), an unfed
+  parasitic element, or an antenna-diversity switch in the `S92` IC. DC continuity on the
+  bricked board separates them — user is checking.
 
 - **NFC wake** (`CAPABILITY_NFC_WAKE`, `WAKEUP_REASON_NFC`): DIO21 is the chip's field-detect
   pin, open-drain, confirmed pulsing low while a phone reads the coil (2026-09-19). Waking the
