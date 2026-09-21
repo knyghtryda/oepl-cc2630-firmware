@@ -380,42 +380,96 @@ a phone reads it back — and 13.56 MHz needs a multi-turn loop, which is the
 back-side coil, not a short straight trace. So the top-left antenna is *not*
 the NFC coil, and an earlier claim here that it was is withdrawn.
 
-#### Detune test (2026-09-21)
+#### What it is: a 2.4 GHz RF wake-up receiver (settled 2026-09-21)
+
+Solum's own paperwork answers this, in the FCC filing for **this exact model**
+(FCC ID `2AFWN-TG-GR6000N`). The S-TAG datasheet they filed (Rev 1.0,
+2017-11-24) lists under Features:
+
+```
+-  Operating on 2.4GHz Unlicensed ISM band for ZigBee
+-  Low Power Consumption
+-  External Wakeup : RF Wakeup (using ISM Band(2.4GHz))
+```
+
+and the test lab's Internal Photographs exhibit annotates the bare PCB with
+exactly three antenna callouts:
+
+```
+Zigbee transmission Antenna
+Zigbee receiving Antenna (Wake Up)      <- the top-left trace, feeding S92
+NFC receiving Antenna                    <- the coil on the back
+```
+
+So the top-left antenna is a **receive-only** wake antenna, the `S92` is its
+receiver, and **DIO22 is the wake line**. The pinout said as much before the
+filing did: one interrupt line to the MCU and no data bus means the part
+reports an event rather than being commanded.
+
+**The chip is Solum's own.** atc1441 decapped one in 2021 and found it names
+itself `SEM9210` — "SEM" is Solum's in-house prefix (their ZBS243 SoC is
+SEM9110), and the die has 8 bond pads. That is why no SMD marking database
+has `S92`: it was never a catalogue part. The same marking turns up on the
+Solum 2.9" CC2630 board (`S92`/`742`, the same lot code as ours) and on the
+7.5" 88MZ100 (`S92`/`818`).
+
+**How Solum drives it.** There is a certified handheld wand for it: FCC ID
+`2AFWN-EL900ABBX0`, "Wake Up Remote Controller", function *"Wakeup / Page
+Selection"*, 2405-2480 MHz, typ. 20 dBm, and a stated **"Wakeup Sensitivity:
+0.01 ~ 10cm or more"**. An envelope-detector wake receiver has poor
+sensitivity, so it is brute-forced from near contact. That also explains the
+one detail we could not place: the stock firmware samples DIO21 inside DIO22's
+ISR because the wand carries *both* RF and NFC wake, and the ISR has to work
+out which path fired.
+
+#### Detune test (2026-09-21) — good measurement, wrong conclusion
 
 Finger held flat against each antenna in turn while logging the RSSI the AP
-reports for the tag, ~31 s per sample, on the bench tag at v46.
+reports, ~31 s per sample, bench tag at v46.
 
 | phase | samples (dBm) | vs untouched |
 |---|---|---|
-| untouched | −72 −72 −72 −73 −75 −76 −72 −74 −73 | — |
-| **control**: finger on the board, away from both antennas | −77 −76 −77 −77 | **−4 dB** |
-| top-left antenna | −81 −84 −85 −86 −84 | **−11 dB** |
-| bottom antenna | −82 −86 −85 −87 | **−12 dB** |
+| untouched | -72 -72 -72 -73 -75 -76 -72 -74 -73 | - |
+| **control**: finger on the board, away from both antennas | -77 -76 -77 -77 | **-4 dB** |
+| top-left antenna | -81 -84 -85 -86 -84 | **-11 dB** |
+| bottom antenna | -82 -86 -85 -87 | **-12 dB** |
 
-The control is the point of the experiment. A hand near a 2.4 GHz tag absorbs
-regardless of what it touches, and without measuring that you cannot tell
-detuning from proximity — it is worth about 4 dB here. Touching either antenna
-costs a further 7–8 dB on top of it, and both recover fully on release.
+The control was worth running: a hand near a 2.4 GHz tag absorbs whatever it
+touches, and that is worth 4 dB here, so the antennas really do account for a
+further 7-8 dB.
 
-**So both trace antennas are electrically coupled to the radio.** That rules
-out the obvious reading — that the top-left one belongs to some separate
-subsystem with its own transceiver. What it does not say is how they are
-coupled. Three candidates, in rough order of likelihood:
+**But the conclusion drawn from it was wrong.** This section used to argue that
+because both antennas detune the link, the top-left one could not belong to a
+separate subsystem. That does not follow. Two resonant 2.4 GHz structures a few
+centimetres apart on one small ground plane couple strongly *whatever* they are
+connected to — loading one detunes it and reradiates into the other. The 11 dB
+is exactly what the FCC-confirmed answer predicts. The hypotheses this section
+listed (same net / parasitic element / diversity switch) are all retired; the
+right answer was a fourth that was never on the list, a **receive-only**
+subsystem.
 
-1. **Same net.** The top-left is an alternate antenna footprint wired in
-   parallel, probably a per-variant option left populated here.
-2. **Parasitic element.** An unfed director or reflector close enough to couple
-   and shape the pattern. The length ratio is suggestive: parasitic elements are
-   deliberately a few percent shorter than the driven element, and 17.3 mm
-   against 20.1 mm is about right.
-3. **Switched front end.** The `S92` IC is an RF switch or front-end module
-   selecting between the two antennas — real antenna diversity.
+#### Trying it
 
-DC continuity on a dead board separates these: antenna-to-antenna, top-left to
-the `S92` pads, and each antenna to the CC2630's RF pin. Hypothesis 2 is the one
-that shows no DC connection anywhere. Note that a shunt-to-ground inductor at
-the feed is common, so a low reading to ground is not by itself evidence of a
-short between the two.
+Nothing needs reverse-engineering: the stimulus is an **unmodulated 2.4 GHz
+carrier**, held within about a centimetre of the top-left antenna. OEPL's
+`rf-wake` wiki page has a recipe for Solum M2 tags — an ESP32 plus an nRF24L01
+running `startConstCarrier()` on channel 52 (2452 MHz), gated on and off — and
+notes the range is "a couple of centimetres, tops". On M2 the wake element is a
+bare trace on a GPIO; this board has a real receiver chip, so it should be no
+worse.
+
+`make EXTRA_DEFINES="-DBENCH_PIN_WATCH -DBENCH_PIN_WATCH_PULLDOWN"` watches
+DIO21/22/26/27 and logs edges (DIO26/27 are the stock buttons, there as a
+positive control that the watcher works). Pull-down and rising edge is how
+Solum's own 88MZ100 firmware configures its wake pin. Measured on our board,
+DIO22 idles **low** while the IC is powered, so the event is a rising edge.
+
+Before building anything on this, note the AP side is not ready:
+`WAKEUP_REASON_RF` (0x0F) is implemented on exactly one tag family in OEPL
+(ZBS243, using that SoC's own carrier detect), the AP does not decode 0x0F at
+all, and Home Assistant would report `UNKNOWN_15`. There is also no capability
+bit free — all eight are taken. Arming the receiver costs about 0.9 uA on ZBS
+by OEPL's own note; ours is unmeasured.
 
 ### Other consequences
 

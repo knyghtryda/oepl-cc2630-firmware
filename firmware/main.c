@@ -265,6 +265,134 @@ static uint32_t retry_backoff_s(uint8_t streak)
     return s > RETRY_MAX_S ? RETRY_MAX_S : s;
 }
 
+#ifdef BENCH_PIN_WATCH
+// -----------------------------------------------------------------------------
+//  Bench: what is the 8-pad IC in the top-left corner for?
+//
+//  It has its own ~17.3 mm antenna, its own supply, and exactly one line to the
+//  CC2630 — package pin 32, which the datasheet says is DIO22. The stock
+//  firmware's PIN table configures DIO22 and its ISR samples DIO21. Nothing
+//  else is known, so watch the line and see what moves it.
+//
+//  DIO26/27 are the stock firmware's two buttons. They are watched here purely
+//  as a positive control: if pressing a button logs an edge, the watcher works,
+//  and "DIO22 never fired" is a real result rather than a broken harness.
+//
+//  Every DIO needs IOC_INPUT_ENABLE to read anything — without it every read
+//  returns 0 and the whole scan looks like "all pins low", which cost an
+//  afternoon the first time.
+//
+//    make EXTRA_DEFINES=-DBENCH_PIN_WATCH                 # pull-up (default)
+//    make EXTRA_DEFINES="-DBENCH_PIN_WATCH -DBENCH_PIN_WATCH_PULLDOWN"
+//    ... -DBENCH_PIN_WATCH_SECS=600                       # default 300
+// -----------------------------------------------------------------------------
+#ifndef BENCH_PIN_WATCH_SECS
+#define BENCH_PIN_WATCH_SECS  300
+#endif
+
+static void pw_dec(uint32_t v)
+{
+    char b[11];
+    uint8_t n = 0;
+    if (v == 0) { rtt_putc('0'); return; }
+    while (v && n < sizeof(b)) { b[n++] = (char)('0' + (v % 10)); v /= 10; }
+    while (n) rtt_putc(b[--n]);
+}
+
+static void bench_pin_watch(void)
+{
+    static const uint8_t pins[] = { 21, 22, 26, 27 };
+    const uint8_t n = sizeof(pins) / sizeof(pins[0]);
+#ifdef BENCH_PIN_WATCH_PULLDOWN
+    const uint32_t pull = IOC_IOPULL_DOWN;
+#else
+    const uint32_t pull = IOC_IOPULL_UP;
+#endif
+
+    rtt_puts("PW: enter\r\n");
+    PRCMPowerDomainOn(PRCM_DOMAIN_PERIPH);
+    while (PRCMPowerDomainStatus(PRCM_DOMAIN_PERIPH) != PRCM_DOMAIN_POWER_ON) { }
+    PRCMPeripheralRunEnable(PRCM_PERIPH_GPIO);
+    PRCMLoadSet();
+    while (!PRCMLoadGet()) { }
+    rtt_puts("PW: domain ok\r\n");
+
+    uint8_t prev[sizeof(pins)];
+    uint32_t edges[sizeof(pins)];
+    for (uint8_t i = 0; i < n; i++) {
+        IOCPortConfigureSet(pins[i], IOC_PORT_GPIO, pull | IOC_INPUT_ENABLE);
+        GPIO_setOutputEnableDio(pins[i], GPIO_OUTPUT_DISABLE);
+        edges[i] = 0;
+    }
+    rtt_puts("PW: pins configured\r\n");
+    oepl_hw_delay_ms(5);                  // let the pulls settle before sampling
+    for (uint8_t i = 0; i < n; i++)
+        prev[i] = oepl_hw_gpio_get(pins[i]) ? 1 : 0;
+    rtt_puts("PW: sampled\r\n");
+
+    rtt_puts("PINWATCH: ");
+    rtt_puts(pull == IOC_IOPULL_UP ? "pull-up" : "pull-down");
+    rtt_puts(", start ");
+    for (uint8_t i = 0; i < n; i++) {
+        rtt_puts(" DIO");
+        pw_dec(pins[i]);
+        rtt_puts("=");
+        pw_dec(prev[i]);
+    }
+    rtt_puts("\r\n  (DIO26/27 are the stock buttons - press one to prove this works)\r\n");
+
+    // oepl_hw_get_time_ms() is a stub that returns 0, so time comes from the
+    // AON RTC instead: AONRTCCurrentCompareValueGet() is seconds in 16.16
+    // fixed point, the same source enter_sleep() uses.
+    uint32_t t0 = AONRTCCurrentCompareValueGet();
+    uint32_t last_report = t0;
+    for (;;) {
+        uint32_t now = AONRTCCurrentCompareValueGet();
+        uint32_t elapsed = (now - t0) >> 16;              // whole seconds
+        if (elapsed >= (uint32_t)BENCH_PIN_WATCH_SECS) break;
+        oepl_hw_wdt_kick();     // the watchdog bites at ~90 s; this loop is longer
+
+        for (uint8_t i = 0; i < n; i++) {
+            uint8_t v = oepl_hw_gpio_get(pins[i]) ? 1 : 0;
+            if (v != prev[i]) {
+                prev[i] = v;
+                edges[i]++;
+                rtt_puts("PIN t+");
+                pw_dec(elapsed);
+                rtt_puts(".");
+                pw_dec((((now - t0) & 0xFFFF) * 10u) >> 16);
+                rtt_puts("s DIO");
+                pw_dec(pins[i]);
+                rtt_puts(v ? " ->1\r\n" : " ->0\r\n");
+            }
+        }
+
+        if (((now - last_report) >> 16) >= 10u) {  // heartbeat: silence stays visibly alive
+            last_report = now;
+            rtt_puts("PINWATCH alive t+");
+            pw_dec(elapsed);
+            rtt_puts("s edges");
+            for (uint8_t i = 0; i < n; i++) {
+                rtt_puts(" D");
+                pw_dec(pins[i]);
+                rtt_puts("=");
+                pw_dec(edges[i]);
+            }
+            rtt_puts("\r\n");
+        }
+    }
+
+    rtt_puts("PINWATCH: done, totals");
+    for (uint8_t i = 0; i < n; i++) {
+        rtt_puts(" DIO");
+        pw_dec(pins[i]);
+        rtt_puts("=");
+        pw_dec(edges[i]);
+    }
+    rtt_puts("\r\n");
+}
+#endif // BENCH_PIN_WATCH
+
 static void print_mac_msb(const uint8_t *mac_lsb)
 {
     // Print MAC in human-readable MSB-first order (reverse of wire order)
@@ -1189,6 +1317,12 @@ int main(void)
     } else {
         rtt_puts("WARM BOOT: skipping splash\r\n");
     }
+
+#ifdef BENCH_PIN_WATCH
+#ifndef BENCH_PIN_WATCH_NOCALL
+    bench_pin_watch();
+#endif
+#endif
 
 #ifdef BENCH_SPLASH_LOOP
     // Bench: refresh the panel, sleep, refresh again. Checks that the state
