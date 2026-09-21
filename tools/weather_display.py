@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 Nathan Bigelow
 """Weather display for the 6" BWR tag, driven by Home Assistant.
 
 The layout is written once as an OpenEPaperLink `drawcustom` payload whose

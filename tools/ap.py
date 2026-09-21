@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 Nathan Bigelow
 """OEPL access-point helper for bench-testing CC2630 tags.
 
 Talks to the AP's web endpoints (the same ones the AP's web UI uses) so a

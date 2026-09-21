@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 Nathan Bigelow
 """Link-quality metrics from an RTT log of block downloads and check-ins.
 
     tools/rf_metrics.py rtt.txt [more.txt ...]

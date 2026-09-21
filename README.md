@@ -225,6 +225,23 @@ reporting R12 as the fault PC.
 Thanks also to everyone who opened an issue — several of them were the first
 sign of a real bug.
 
+## License
+
+[GNU General Public License v3.0 or later](LICENSE).
+
+You may use, study, modify and redistribute this firmware. If you distribute a
+modified version — including flashed onto tags you hand to someone else — you
+must make your source available under the same terms. That is the point: these
+tags are e-waste being kept useful, and fixes should reach everyone who has one
+rather than stopping at a private fork.
+
+A note on relationship to upstream: the OpenEPaperLink project is licensed
+CC BY-NC-SA 4.0, which is not compatible with the GPL in either direction. No
+code is shared between the two — this is an independent implementation for a
+chip OEPL does not target, and it speaks OEPL's wire protocol, which is not
+itself a copyrightable thing. If OEPL ever wants any of this upstream, ask and
+it can be relicensed for that purpose.
+
 ## Based On
 
 - [OpenEPaperLink](https://github.com/OpenEPaperLink/OpenEPaperLink) project

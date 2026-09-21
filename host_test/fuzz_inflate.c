@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Nathan Bigelow
 // Robustness check: the tag runs this decoder on radio data, so a corrupt or
 // truncated stream must return an error, not hang, overrun the sink, or read
 // outside the input buffer.

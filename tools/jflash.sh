@@ -1,4 +1,6 @@
 #!/bin/bash
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 Nathan Bigelow
 # Flash the bench tag over J-Link (cJTAG) with a readback verify, then run it.
 #
 #   tools/jflash.sh [bin]        default binaries/Tag_FW_CC2630_TG-GR6000N.bin (full image incl. CCFG)

@@ -1,4 +1,6 @@
 #!/bin/bash
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 Nathan Bigelow
 # Monitor DIO11 via RPi GPIO 17
 # If firmware is toggling DIO11, we'll see the value change
 # between reads.

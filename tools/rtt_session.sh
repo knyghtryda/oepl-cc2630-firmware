@@ -1,4 +1,6 @@
 #!/bin/bash
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 Nathan Bigelow
 # Power the bench tag from the PPK2 and log RTT for SECS seconds.
 #   tools/rtt_session.sh SECS out.txt
 # (Debugger attached: the tag won't reach standby -- use for radio/protocol

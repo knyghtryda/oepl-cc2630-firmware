@@ -1,4 +1,6 @@
 #!/bin/bash
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 Nathan Bigelow
 # Flash and verify firmware on TG-GR6000N via UART bootloader
 #
 # Wiring (pogo jig):

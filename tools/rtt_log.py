@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 Nathan Bigelow
 """Log SEGGER RTT output from a running JLinkGDBServer (-RTTTelnetPort 19021).
 
     tools/rtt_log.py [seconds] [out.txt]

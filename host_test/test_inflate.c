@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Nathan Bigelow
 // Host test for firmware/inflate.c: decode what the AP's own compressor
 // produces and compare byte for byte against the raw image.
 //   test_inflate <zlib_file> <expected_raw_file>

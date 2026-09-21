@@ -1,4 +1,6 @@
 #!/bin/bash
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 Nathan Bigelow
 # Control the D/L (Download) pin on the TG-GR6000N via Raspberry Pi GPIO 17
 #
 # The D/L pin controls bootloader entry on the CC2630:

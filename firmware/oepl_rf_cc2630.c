@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Nathan Bigelow
 // -----------------------------------------------------------------------------
 //  CC2630 RF Core Driver for OEPL
 //  Bare-metal IEEE 802.15.4 radio using TI driverlib

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Nathan Bigelow
 // -----------------------------------------------------------------------------
 //  NFC tag chip access — see oepl_nfc_cc2630.h for the wiring and why it is
 //  worth having.

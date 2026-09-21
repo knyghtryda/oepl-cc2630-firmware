@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Nathan Bigelow
 // -----------------------------------------------------------------------------
 //  OEPL Protocol Layer for CC2630
 //  Builds IEEE 802.15.4 frames with OEPL payload, uses oepl_rf_cc2630 for TX/RX

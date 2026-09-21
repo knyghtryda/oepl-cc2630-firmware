@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Nathan Bigelow
 // -----------------------------------------------------------------------------
 //  Splash Screen Renderer for CC2630 OEPL Tag
 //  Streams 4bpp rows directly to UC8159 — no framebuffer needed.

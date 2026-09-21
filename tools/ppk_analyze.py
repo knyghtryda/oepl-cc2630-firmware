@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 Nathan Bigelow
 """Summarise a PPK2 trace written by `tools/ppk.py measure SECS out.csv`.
 
     tools/ppk_analyze.py trace.csv [--from SECS] [--to SECS] [--quiet-uA N]

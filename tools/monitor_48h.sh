@@ -1,4 +1,6 @@
 #!/bin/bash
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 Nathan Bigelow
 # Monitor CC2630 tag checkins via AP API for 48 hours
 # Usage: ./monitor_48h.sh [mac] [ap_ip]
 # Logs to /tmp/tag_monitor.log

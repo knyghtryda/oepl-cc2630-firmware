@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Nathan Bigelow
 #ifndef OEPL_NVM_CC2630_H
 #define OEPL_NVM_CC2630_H
 

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Nathan Bigelow
 // -----------------------------------------------------------------------------
 //  NFC tag chip (NXP NTAG I2C family) on the TG-GR6000N
 //

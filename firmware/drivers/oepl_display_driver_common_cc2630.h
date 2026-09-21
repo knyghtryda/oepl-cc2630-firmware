@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Nathan Bigelow
 #ifndef OEPL_DISPLAY_DRIVER_COMMON_CC2630_H
 #define OEPL_DISPLAY_DRIVER_COMMON_CC2630_H
 

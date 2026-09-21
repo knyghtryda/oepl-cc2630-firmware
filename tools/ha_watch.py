@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 Nathan Bigelow
 """Watch the Home Assistant -> AP image path and record when it breaks.
 
 On 2026-09-19 the weather automation fired, `open_epaper_link.drawcustom`

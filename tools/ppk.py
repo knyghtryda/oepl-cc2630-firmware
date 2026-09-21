@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 Nathan Bigelow
 """Nordic PPK2 control for the bench tag: it is the tag's power supply
 (source-meter mode) and current meter.
 

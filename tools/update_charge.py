@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 Nathan Bigelow
 """Charge used by an image update in a PPK2 trace (tools/ppk.py measure ... out.csv).
 
     tools/update_charge.py trace.csv --from SECS

@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 Nathan Bigelow
 """Read the crash capture (struct crash_capture g_crash, fault.h) from the bench
 tag over J-Link and print it: fault code, the hung RF command, registers, and
 the last ~1 KB of debug output before the fault.

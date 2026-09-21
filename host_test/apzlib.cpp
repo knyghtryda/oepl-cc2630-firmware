@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Nathan Bigelow
 // Host replica of the AP's image compressor (ESP32_AP-Flasher/src/makeimage.cpp),
 // so the tag-side decoder can be tested offline against bit-identical input.
 //   apzlib <raw_in> <planes> <width> <height> <out>

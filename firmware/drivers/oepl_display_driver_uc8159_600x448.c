@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Nathan Bigelow
 // -----------------------------------------------------------------------------
 //  UC8159 600x448 E-Paper Display Driver for TG-GR6000N
 //  v31b: Working display driver with OTP waveform load

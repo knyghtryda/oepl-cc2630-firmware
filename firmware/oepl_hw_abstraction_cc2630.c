@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Nathan Bigelow
 // -----------------------------------------------------------------------------
 //  CC2630 Hardware Abstraction Layer for OEPL display
 //  Bare-metal using TI cc26x0 driverlib

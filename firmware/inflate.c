@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Nathan Bigelow
 // -----------------------------------------------------------------------------
 //  Minimal DEFLATE/zlib decompressor — see inflate.h for why it is shaped this
 //  way. Decoding is the straightforward canonical-Huffman walk (one bit at a
