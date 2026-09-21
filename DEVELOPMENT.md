@@ -356,15 +356,38 @@ OEPL's own `tagtypes/35.json` lists `"options": ["button", "led"]` for hwType
 simply never reads them. The LED is most likely DIO16 or 17, which stock gates
 behind per-variant capability bits.
 
-**The second antenna is an NFC coil, not a second radio.** Beside it is a
-passive NFC Type-2 tag IC (NXP NTAG I²C family) that harvests power from a
-phone's field — it has no transmitter of its own. The CC2630 writes an NDEF
+**There is an NFC tag chip on the board, and it is not a second radio.** A
+passive NFC Type-2 tag IC (NXP NTAG I²C family) harvests power from a phone's
+field — it has no transmitter of its own. The CC2630 writes an NDEF
 payload into it over I²C (the payload comes from the external SPI flash at
 0xC0000), auto-detecting the 1k and 2k variants from the capability container
 (`E1 10 6D 00` / `E1 10 EA 00`) and verifying its own writes. The whole path
 is behind a capability bit, so the chip is a populate option per variant.
 
-Two consequences for us:
+### The three antennas (one still unidentified)
+
+This board has **three** antennas, and an earlier version of this document
+wrongly collapsed two of them into one. For the record:
+
+| where | what |
+|---|---|
+| below the processor, ~20.1 mm trace | the 2.4 GHz radio — assumed, not yet proven |
+| back side, slightly left of centre | a multi-turn coil — this is the NFC antenna |
+| top left, ~17.3 mm trace, own 8-pad IC marked `S92` / `742` | **unidentified** |
+
+The NFC chip is real and works — we read its UID over I²C, write NDEF to it and
+a phone reads it back — and 13.56 MHz needs a multi-turn loop, which is the
+back-side coil, not a short straight trace. So the top-left antenna and its own
+IC remain unexplained. It is *not* the NFC coil, and the claim that it was is
+withdrawn.
+
+What would settle it, cheaply: continuity from the NTAG chip's LA/LB pins to
+the back-side coil (confirming the pairing), and a detune test — hold a finger
+or a grounded object against each trace antenna in turn while watching the
+tag's reported RSSI. The antenna the radio actually uses will move; the others
+will not.
+
+### Other consequences
 
 - **DIO5 is probably not "panel power" but a shared peripheral rail** — the
   stock NFC init power-cycles DIO5 before opening I²C. Worth remembering if

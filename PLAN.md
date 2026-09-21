@@ -191,13 +191,23 @@ Most findings were already fixed and measured in v0.19/v0.20; PRs are superseded
       Daily budget 1.54 → **0.83 mAh**, i.e. ~6 years on 4x CR2450, where cell self-discharge
       starts to matter as much as the tag. Updates are now 71% of the budget.
 
-- [x] **NFC** (2026-09-19, v0.30). The second antenna turned out to be an NFC coil with a
-      passive NTAG I2C chip on DIO24/25 — no second transmitter. The tag now writes its own
+- [x] **NFC** (2026-09-19, v0.30). The board has a passive NTAG I2C chip on DIO24/25, its
+      coil the multi-turn loop on the back of the PCB — no second transmitter. The tag now writes its own
       identity there at cold boot and accepts AP-pushed content, so OEPL's "Set NFC URL"
       content mode works on these tags for the first time. Verified by phone: identity record,
       then a pushed URL that opened.
 
 ## Follow-ups (not blocking)
+
+- **The top-left antenna is still unidentified** (reopened 2026-09-21). The board has
+  *three* antennas, not two: the ~20.1 mm trace below the processor (assumed to be the
+  2.4 GHz radio), the multi-turn coil on the back (the NFC chip's, confirmed working), and
+  a ~17.3 mm trace in the top-left corner with its own 8-pad IC marked `S92` / `742`. The
+  v0.30 note claiming the top-left antenna was the NFC coil was wrong and is withdrawn:
+  13.56 MHz needs a loop, not a short straight trace. Two cheap tests would settle it —
+  continuity from the NTAG's LA/LB pins to the back coil, and a detune test (hold a finger
+  against each trace antenna in turn while watching reported RSSI; only the one the radio
+  uses will move).
 
 - **NFC wake** (`CAPABILITY_NFC_WAKE`, `WAKEUP_REASON_NFC`): DIO21 is the chip's field-detect
   pin, open-drain, confirmed pulsing low while a phone reads the coil (2026-09-19). Waking the

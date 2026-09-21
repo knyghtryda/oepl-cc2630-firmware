@@ -185,10 +185,13 @@ the FTDI adapter used for cc2538-bsl flashing.
 - **The reported firmware version selects the AP's image format.** At 39 or
   above the AP sends zlib-compressed images (which this firmware decodes);
   below 39 it sends raw. See DEVELOPMENT.md before changing the version.
-- **NFC is supported** (v0.30): the board's second antenna is a coil for a passive NTAG
-  I2C chip. The tag writes its identity there at boot and accepts URLs pushed from the AP's
-  "Set NFC URL" content mode. A tap works even on a flat or bricked tag, since the chip is
-  powered by the reader.
+- **NFC is supported** (v0.30): the board carries a passive NTAG I2C chip with a
+  multi-turn coil on the back of the PCB. The tag writes its identity there at boot and
+  accepts URLs pushed from the AP's "Set NFC URL" content mode. A tap works even on a flat
+  or bricked tag, since the chip is powered by the reader.
+- **A third antenna on the board is still unidentified** — a ~17.3 mm trace in the top-left
+  corner with its own 8-pad IC (marked `S92` / `742`), separate from both the 2.4 GHz
+  antenna and the NFC coil. See DEVELOPMENT.md, "The three antennas".
 - **UART debug mirror** off by default (`-DRTT_UART`); it never produced
   output on this board and kept the serial domain powered. Use RTT.
 
