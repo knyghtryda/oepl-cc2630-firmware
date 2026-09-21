@@ -216,10 +216,22 @@ Most findings were already fixed and measured in v0.19/v0.20; PRs are superseded
       see DEVELOPMENT.md; two resonant 2.4 GHz structures on one ground plane always couple,
       so it never ruled out a separate receive-only subsystem.
 
-- **NFC wake** (`CAPABILITY_NFC_WAKE`, `WAKEUP_REASON_NFC`): DIO21 is the chip's field-detect
-  pin, open-drain, confirmed pulsing low while a phone reads the coil (2026-09-19). Waking the
-  tag on a tap would need it configured as an AON edge wake source. Unknown: whether the pulse
-  is long enough to catch reliably, and what it costs in standby to keep the input armed.
+- **Wake-on-tap and wake-on-RF: understood, deliberately not implemented** (decided
+  2026-09-21). Both paths exist in hardware and both are now characterised:
+  - *NFC wake* — DIO21 is the NTAG's field-detect pin, open-drain, confirmed pulsing low
+    while a phone reads the coil (2026-09-19).
+  - *RF wake* — DIO22 is the `SEM9210` receiver's output, idle low, rising edge; the
+    stimulus is an unmodulated 2.4 GHz carrier within about a centimetre (see above).
+
+  Neither is being built, because there is no use for them here: the tag already checks in
+  often enough for anything this deployment does, and an on-demand wake only pays off when
+  someone is standing at the shelf with a wand. Both would also cost standby current to keep
+  armed, against a 9.1 µA floor that took real work to reach. Recorded so the next person
+  does not have to rediscover the hardware — not as a backlog item.
+
+  If either is ever wanted, note the AP side is not ready for RF wake: `WAKEUP_REASON_RF`
+  (0x0F) is implemented on one tag family in OEPL, the AP does not decode it, Home Assistant
+  shows `UNKNOWN_15`, and all eight capability bits are already taken.
 
 - [x] **Radio link margin** — answered 2026-09-19, and it was not sensitivity. With the tag
       shielded to ~−74 dBm, 28% of check-ins failed because the AP never heard the request

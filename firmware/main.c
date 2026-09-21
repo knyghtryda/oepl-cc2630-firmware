@@ -309,13 +309,11 @@ static void bench_pin_watch(void)
     const uint32_t pull = IOC_IOPULL_UP;
 #endif
 
-    rtt_puts("PW: enter\r\n");
     PRCMPowerDomainOn(PRCM_DOMAIN_PERIPH);
     while (PRCMPowerDomainStatus(PRCM_DOMAIN_PERIPH) != PRCM_DOMAIN_POWER_ON) { }
     PRCMPeripheralRunEnable(PRCM_PERIPH_GPIO);
     PRCMLoadSet();
     while (!PRCMLoadGet()) { }
-    rtt_puts("PW: domain ok\r\n");
 
     uint8_t prev[sizeof(pins)];
     uint32_t edges[sizeof(pins)];
@@ -324,11 +322,9 @@ static void bench_pin_watch(void)
         GPIO_setOutputEnableDio(pins[i], GPIO_OUTPUT_DISABLE);
         edges[i] = 0;
     }
-    rtt_puts("PW: pins configured\r\n");
     oepl_hw_delay_ms(5);                  // let the pulls settle before sampling
     for (uint8_t i = 0; i < n; i++)
         prev[i] = oepl_hw_gpio_get(pins[i]) ? 1 : 0;
-    rtt_puts("PW: sampled\r\n");
 
     rtt_puts("PINWATCH: ");
     rtt_puts(pull == IOC_IOPULL_UP ? "pull-up" : "pull-down");
@@ -1319,9 +1315,7 @@ int main(void)
     }
 
 #ifdef BENCH_PIN_WATCH
-#ifndef BENCH_PIN_WATCH_NOCALL
     bench_pin_watch();
-#endif
 #endif
 
 #ifdef BENCH_SPLASH_LOOP
