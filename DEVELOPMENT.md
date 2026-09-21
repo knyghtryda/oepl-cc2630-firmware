@@ -140,7 +140,14 @@ sector 0 skip its program step, so the retry path runs for real.
 
 Only the AP at `http://192.168.5.4` is assumed; set `OEPL_AP` to override.
 
-### J-Link (cJTAG, pins 24/25) — bring-up or recovery
+### J-Link (cJTAG) — bring-up or recovery
+
+cJTAG runs on the CC2630's dedicated `JTAG_TMSC`/`JTAG_TCKC` pads — the middle
+pad pair on this board. **These are not DIO24/25**, which are the NFC chip's
+I²C bus (see the pin map below); wiring a debugger onto those would find
+nothing and fight the NFC driver. Getting the orientation wrong is harmless but
+silent, so if the probe doesn't connect, try the pair swapped before assuming
+the tag is dead.
 
 ```bash
 JLinkGDBServer -device CC2630F128 -if cJTAG -speed 1000 -port 2331 -RTTTelnetPort 19021 -notimeout &
@@ -329,6 +336,25 @@ recorded here because it answers several long-standing unknowns.
 | **24, 25** | **I²C SDA / SCL → NFC tag chip at address 0x55** |
 | 26, 27 | two debounced buttons (short/long press) |
 | 0, 1, 23, 28–30 | unused |
+
+**Adding a switch.** malcolmputer probed the unmarked pads (issue #1) and found
+four more brought out to the board: DIO23, 24, 25 and 28. Two of those pairs are
+very different things:
+
+- **DIO23 and DIO28 are the ones to use.** Neither the stock firmware nor this
+  one touches them, so there is no contention, and any CC26xx DIO can be an AON
+  edge wake source — a switch there could wake the tag rather than only being
+  polled while it happens to be awake.
+- **DIO24 and DIO25 are the NFC chip's I²C bus.** Don't put a switch on them.
+  They are useful as an external tap onto the NTAG chip without the CC2630
+  involved, but anything else on that bus fights `oepl_nfc_cc2630.c`.
+
+If what you want is the buttons the hardware already has, they are on DIO26/27,
+not on any of the exposed pads — stock debounces them for short and long press.
+OEPL's own `tagtypes/35.json` lists `"options": ["button", "led"]` for hwType
+0x35, so the AP side already expects this tag type to have one; this firmware
+simply never reads them. The LED is most likely DIO16 or 17, which stock gates
+behind per-variant capability bits.
 
 **The second antenna is an NFC coil, not a second radio.** Beside it is a
 passive NFC Type-2 tag IC (NXP NTAG I²C family) that harvests power from a
