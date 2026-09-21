@@ -37,9 +37,12 @@ Custom open-source OEPL firmware for the Solum TG-GR6000N 6.0" BWR e-paper tag.
 **Firmware**: v0.32 — 27 KB flash, 20 KB RAM including the stack (see `PLAN.md`
 for history, `DEVELOPMENT.md` for the test loop)
 
-**Battery**: ≈0.83 mAh/day at a 30-minute check-in with one update an hour,
-i.e. roughly **6 years on 4x CR2450** — far enough out that cell self-discharge
-matters as much as the tag does. Measured, not estimated; the method and the
+**Battery**: ≈0.83 mAh/day for the reference weather tag — **check-in every
+15 minutes, image update every 2 hours** (12 refreshes a day), which works out
+to roughly **6 years on 4x CR2450**, far enough out that the cells' own
+self-discharge matters as much as the tag does. Updates are 71% of that budget
+and sleep 27%, so the number moves with how often you refresh, not with how
+often you check in. Measured, not estimated; the per-item figures and the
 per-pin sleep table are in `DEVELOPMENT.md`.
 
 ## Project Structure
@@ -194,6 +197,33 @@ Fixed since the first release, and no longer issues: sleep current (≈2 mA →
 instead of 17 now that images are compressed), the radio core hanging on
 channel 27, and DIO13/BUSY — the panel does drive BUSY and refreshes now end
 on it (~7.7 s) rather than running to a timeout.
+
+## Contributors
+
+This firmware is better than it would have been because two people took the
+trouble to review it carefully and say what was wrong.
+
+**[@spectrumjade](https://github.com/spectrumjade)** (Justin Gerace) — PRs #5,
+#6 and #7, each with a J-Link diagnosis behind it rather than a guess. The
+deep-sleep path was genuinely broken and the missing
+`SysCtrlSetRechargeBeforePowerDown()` was real; the block-transfer write-up
+correctly identified the `IEEE_SUSPENDED` status blip between TX and RX, and
+that the early bail on empty responses was too impatient; and the hang was
+located inside `RFCDoorbellSendTo`. The branches were superseded by parallel
+work on master before they could be merged, which is a poor reward for being
+right — the findings shaped what landed.
+
+**[@PeitzGreene](https://github.com/PeitzGreene)** — an 8-dimension review of
+the whole tree with every claim put to a separate adversarial verifier: 73
+raised, 8 refuted, 65 documented with reproduction and a suggested fix. It
+caught things testing does not: flash readbacks passing because they went
+through the VIMS cache, the OTA `dataVer` being committed before the apply, a
+staged reset vector accepted without its Thumb bit, OEPL channel index 5 mapping
+to an IEEE channel `CMD_IEEE_RX` rejects, and a HardFault handler that had been
+reporting R12 as the fault PC.
+
+Thanks also to everyone who opened an issue — several of them were the first
+sign of a real bug.
 
 ## Based On
 
