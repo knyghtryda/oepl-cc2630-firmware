@@ -60,9 +60,15 @@
 #define WAKEUP_REASON_NETWORK_SCAN  0xFD
 #define WAKEUP_REASON_WDT_RESET     0xFE   // reported after a HardFault reset
 
-// Firmware version as reported to the AP (`ver` in its tag DB). Keep in step
-// with the "FW vX.Y" string in splash.c. DIAG builds set bit 15 so a debug
-// build (which replaces telemetry with diagnostics) is obvious at the AP.
+// Firmware version as reported to the AP (`ver` in its tag DB). DIAG builds
+// set bit 15 so a debug build (which replaces telemetry with diagnostics) is
+// obvious at the AP.
+//
+// TAG_FW_VERSION_STR is the same release in human form — the splash footer,
+// the git tag and PLAN.md all use it. The two can't be derived from each other
+// because the AP-facing number had to jump past 39 to turn compression on (see
+// below), so it is not 0.NN. Bump both in the same commit: splash.c carried a
+// stale "FW v0.23" through eight releases because the string lived there.
 //
 // The reported version also switches the AP's image format, which is why it
 // is not just a label: the AP compresses by version threshold, not by the
@@ -73,10 +79,11 @@
 // ~30x smaller on the air. Dropping back below 39 is the way to ask the AP
 // for raw images again if the decoder ever needs to be bypassed.
 #if defined(DIAG_TELEMETRY)
-#define TAG_FW_VERSION  (0x8000 | 0x002D)
+#define TAG_FW_VERSION  (0x8000 | 0x002E)
 #else
-#define TAG_FW_VERSION  0x002D
+#define TAG_FW_VERSION  0x002E
 #endif
+#define TAG_FW_VERSION_STR  "v0.32"
 
 // Capabilities
 #define CAPABILITY_SUPPORTS_COMPRESSION  0x02

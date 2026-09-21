@@ -15,6 +15,7 @@
 #include "splash.h"
 #include "font8x8.h"
 #include "oepl_hw_abstraction_cc2630.h"
+#include "oepl_radio_cc2630.h"          // TAG_FW_VERSION_STR (splash footer)
 #include "drivers/oepl_display_driver_uc8159_600x448.h"
 #include "rtt.h"
 #include <string.h>
@@ -250,7 +251,7 @@ void splash_display(const uint8_t *mac, uint16_t battery_mv, int8_t temp_c,
         [TXT_MAC]   = {166,  3, COL_BLACK, mac_str,              0, 0},
         [TXT_BAT]   = {234,  3, COL_BLACK, bat_temp_str,         0, 0},
         [TXT_AP]    = {302,  3, ap_found ? COL_BLACK : COL_RED, ap_str, 0, 0},
-        [TXT_FW]    = {404,  2, COL_BLACK, "FW v0.23",            0, 0},
+        [TXT_FW]    = {404,  2, COL_BLACK, "FW " TAG_FW_VERSION_STR, 0, 0},
         [TXT_FAULT] = {340,  2, COL_RED,   fault_str ? fault_str : "", 0, 0},
     };
     for (uint8_t i = 0; i < NUM_TEXTS; i++)

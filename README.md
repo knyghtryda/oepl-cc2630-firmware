@@ -23,12 +23,24 @@ Custom open-source OEPL firmware for the Solum TG-GR6000N 6.0" BWR e-paper tag.
 - [x] Panel powered off and deep-slept after every refresh
 - [x] UC8159 display driver with OTP waveform loading
 - [x] BWR (black/white/red) image display - 1bpp per layer, 17 blocks
-- [x] Standby between check-ins (TI Power_sleep sequence), ~61 µA measured
+- [x] Compressed images (`DATATYPE_IMG_ZLIB`) decoded on the tag — a picture is
+      ~2 KB on the air instead of ~67 KB, one block instead of 17
+- [x] NFC: writes the tag's identity to the on-board NTAG chip and accepts URLs
+      pushed from the AP's "Set NFC URL" content mode
+- [x] Check-in retried up to 3x within one wake — 68% → 88% of wakes complete
+      at a marginal spot
+- [x] Standby between check-ins, **9.1 µA measured**
 - [x] CCFG backdoor enabled (DIO11 LOW enters bootloader)
 - [x] SEGGER RTT debug output (512-byte buffer)
-- [x] UART TX debug output on DIO3 at 115200 baud
+- [x] UART TX debug mirror on DIO3 at 115200 baud (off by default)
 
-**Firmware**: v0.22 — ~18KB flash, 13KB static RAM (see `PLAN.md` for history, `DEVELOPMENT.md` for the test loop)
+**Firmware**: v0.32 — 27 KB flash, 20 KB RAM including the stack (see `PLAN.md`
+for history, `DEVELOPMENT.md` for the test loop)
+
+**Battery**: ≈0.83 mAh/day at a 30-minute check-in with one update an hour,
+i.e. roughly **6 years on 4x CR2450** — far enough out that cell self-discharge
+matters as much as the tag does. Measured, not estimated; the method and the
+per-pin sleep table are in `DEVELOPMENT.md`.
 
 ## Project Structure
 
@@ -153,11 +165,13 @@ the FTDI adapter used for cc2538-bsl flashing.
 
 ## Known Issues
 
-- **Weak-signal cliff at about −77 dBm.** The tag stops hearing the AP well
-  above where a CC2630 should (≈−95 dBm for 802.15.4). This firmware applies
-  no RF patches, while the stock and OEPL-alpha firmwares both apply
-  `rf_patch_cpe_ieee` and stock adds override entries (LNA bias trim, RSSI
-  offset). Untested at the edge — see PLAN.md.
+- **A marginal link costs check-ins, but not for the reason it looks like.**
+  Measured with the tag shielded to ≈−74 dBm: 28% of check-ins failed because
+  the AP never heard the *request*, against 4% where the tag missed the reply.
+  So it is uplink, not receive sensitivity — an RF_CFG sweep (CPE patch and
+  override combinations, 4 configs x 2 rounds) found no significant difference.
+  Retrying the request up to 3x within one wake takes 68% of wakes to 88%.
+  See DEVELOPMENT.md, "Radio: what limits a marginal link".
 - **A compressed image larger than 20 KB will not display.** Images are staged
   in flash sectors 16–20 before decoding; anything bigger is refused and
   retried. The weather layout is ~6 KB and a test card ~2.2 KB, so there is
