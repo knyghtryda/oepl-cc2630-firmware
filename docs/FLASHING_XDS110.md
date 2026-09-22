@@ -44,10 +44,13 @@ Keep the TMS/TCK leads short (< 20 cm) and don't twist them together. The tag's
 
 ## UniFlash configuration
 
-The UniFlash GUI's "Detected devices" list only shows the LaunchPad's own MCU,
-which makes it look like the XDS110 can't be used for an external target. It
-can — you just have to hand `dslite` a target configuration (`.ccxml`)
-directly. A ready-made one is in the repo: **`tools/cc2630_xds110.ccxml`**.
+The UniFlash GUI's "Detected devices" list only shows the LaunchPad's own MCU
+(e.g. the CC3220), so don't pick that. The GUI still works for the tag if you
+go to *New Configuration*, type **CC2630F128** into the device search box, choose
+**Texas Instruments XDS110 USB Debug Probe** as the connection, and then apply
+the three settings below under *Settings & Utilities*. It's just more clicking
+every time — the scripts hand `dslite` a ready-made target configuration,
+**`tools/cc2630_xds110.ccxml`**, with those settings already baked in.
 
 The three settings that matter, all of which differ from UniFlash's defaults:
 
@@ -104,7 +107,7 @@ All of these were hit while getting this working. Check them in order.
 
 | Symptom | Cause / fix |
 |---|---|
-| UniFlash GUI won't show the CC2630 or the XDS110 | Expected — use the CLI with `tools/cc2630_xds110.ccxml`. Support is still present in 9.5.0. |
+| UniFlash GUI only detects the LaunchPad's own MCU (CC3220 etc.) | Expected — the tag isn't auto-detected. Type `CC2630F128` into the device search manually, or skip the GUI and use the scripts. |
 | `Error -242 ... A router subpath could not be accessed` | The XDS110 reaches the CC2630's IcePick but the DAP behind it doesn't answer. Seen with OSCAN2 (the default) and with a marginal TMS/TCK connection. Use OSCAN1; re-check the two JTAG wires. |
 | `Error -2131 Unable to access device register` | Same root cause as -242, one step further in. Lower TCLK to 100 kHz; re-check TMS/TCK. |
 | `Error -275` (target polling timeout) | Same family; OSCAN1 + slower clock. |
