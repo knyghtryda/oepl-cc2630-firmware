@@ -33,8 +33,9 @@ no PIL and no OEPL knowledge: it builds JSON and POSTs it. The local
 renderer (borrowed from weather_display.py) emulates the integration's
 drawing code, so `preview` is what the tag will show.
 
-Environment: HA_URL (default http://192.168.13.122:8123),
-QUOTA_WEBHOOK_ID (the webhook path segment).
+Sending needs only this file and one secret, the webhook URL: set
+QUOTA_WEBHOOK_URL, or HA_URL + QUOTA_WEBHOOK_ID. `preview` and `install`
+additionally need PIL and HA credentials, and only ever run on the dev host.
 """
 import datetime as dt
 import json
@@ -42,11 +43,20 @@ import os
 import sys
 import urllib.request
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import weather_display as wd                                    # noqa: E402
 
+def _wd():
+    """weather_display supplies the local renderer and the HA API helper. It
+    needs PIL and reads ~/secrets.toml, so it is imported only by the commands
+    that run on the dev host -- never on the machine that just sends data."""
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    import weather_display
+    return weather_display
+
+# Sending needs exactly one secret: the webhook URL. Give it whole via
+# QUOTA_WEBHOOK_URL, or as HA_URL + QUOTA_WEBHOOK_ID.
 HA_URL = os.environ.get("HA_URL", "http://192.168.13.122:8123").rstrip("/")
-WEBHOOK_ID = os.environ.get("QUOTA_WEBHOOK_ID", "claude-quota")
+WEBHOOK_ID = os.environ.get("QUOTA_WEBHOOK_ID", "")
+WEBHOOK_URL = os.environ.get("QUOTA_WEBHOOK_URL") or f"{HA_URL}/api/webhook/{WEBHOOK_ID}"
 
 W, H = 600, 448
 RED_AT = 80          # a bar this full or fuller is drawn red
@@ -207,7 +217,7 @@ def _load(args):
 def cmd_preview(args):
     data, rest = _load(args)
     out = rest[0] if rest else "/tmp/quota.png"
-    img = wd.render(build_payload(data))
+    img = _wd().render(build_payload(data))
     img.save(out)
     print(f"wrote {out}")
 
@@ -246,14 +256,17 @@ def cmd_install(args):
     if len(args) < 2:
         print("usage: install WEBHOOK_ID DEVICE_ID")
         return 2
-    print(wd.ha(f"/api/config/automation/config/{AUTOMATION_ID}",
+    print(_wd().ha(f"/api/config/automation/config/{AUTOMATION_ID}",
                 build_automation(args[0], args[1])))
 
 
 def cmd_push(args):
     data, _ = _load(args)
     body = json.dumps({"payload": build_payload(data)}).encode()
-    req = urllib.request.Request(f"{HA_URL}/api/webhook/{WEBHOOK_ID}", data=body,
+    if not WEBHOOK_ID and not os.environ.get("QUOTA_WEBHOOK_URL"):
+        print("set QUOTA_WEBHOOK_URL (or QUOTA_WEBHOOK_ID)", file=sys.stderr)
+        return 2
+    req = urllib.request.Request(WEBHOOK_URL, data=body,
                                  headers={"Content-Type": "application/json"}, method="POST")
     with urllib.request.urlopen(req, timeout=30) as r:
         print(r.status, (r.read() or b"").decode(errors="replace")[:200])
