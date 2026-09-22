@@ -144,11 +144,52 @@ dbgjtag.exe -f @xds110 -rv -o -S integrity -V apply,DOT7.DTS_USAGE=enable,DOT7.D
 dslite.bat --config=tools/cc2630_xds110.ccxml -g dslite.log -S x
 ```
 
+## Alternative: UART bootloader through the XDS110
+
+The XDS110 also exposes a USB serial port ("XDS110 Class **Application/User
+UART**" — not the "Auxiliary Data Port") wired to the **RXD/TXD** pins on the
+same isolation header. That makes the LaunchPad a complete
+[`cc2538-bsl`](https://github.com/JelmerT/cc2538-bsl) jig as well, with no
+JTAG involved — handy for a tag that won't take a JTAG connect, or for the
+UART route in the README without a Raspberry Pi. Verified on Windows with
+the same tag set.
+
+Wiring (pull the RXD and TXD jumpers too; debugger-side pins, crossed):
+
+| LaunchPad (debugger side) | Tag pad |
+|---------------------------|---------|
+| TXD                       | RXD     |
+| RXD                       | TXD     |
+| GND                       | GND     |
+
+Then:
+
+1. Jumper the tag's **`TI_DN`** pad to GND and keep it there.
+2. Reset the tag (Reset pad to GND, or pull the battery). The screen must
+   **not** refresh — no splash means the ROM bootloader has the chip.
+3. Read-only probe first; it prints the chip and the tag's IEEE address:
+   ```
+   cc2538_bsl.py -p COM17 -b 115200 -r -l 16 -a 0 readback.bin
+   ```
+4. Flash (erase + write + CRC32 verify):
+   ```
+   cc2538_bsl.py -p COM17 -b 500000 -e -w -v binaries/Tag_FW_CC2630_TG-GR6000N.bin
+   ```
+5. Remove the `TI_DN` jumper and power cycle.
+
+`cc2538-bsl` toggles DTR/RTS to try to enter the bootloader by itself; with
+nothing wired to them that's harmless, so don't pass
+`--bootloader-invert-lines`. The COM port number is whatever Windows
+assigned — check Device Manager. A plain USB-UART adapter (CH340/CP2102) on
+its 3.3 V setting works the same way. If the sync times out
+(`Timeout waiting for ACK/NACK after 'Synch'`) with the tag confirmed in the
+bootloader, swap the two data wires.
+
 ## If the firmware on the tag sleeps before the debugger connects
 
-Not needed in testing, but worth knowing: both the stock and OEPL CCFG enable
-the ROM bootloader backdoor on **DIO11 (`TI_DN` pad), active low**. Grounding
-`TI_DN` while the XDS110 issues its board reset parks the chip in the ROM
-bootloader, which never enters standby, so the JTAG connect can't lose the race
-against a firmware that sleeps immediately after boot. Remove the ground before
-power-cycling to boot the new image.
+Both the stock and OEPL CCFG enable the ROM bootloader backdoor on
+**DIO11 (`TI_DN` pad), active low**. Grounding `TI_DN` while the XDS110 issues
+its board reset parks the chip in the ROM bootloader, which never enters
+standby, so the JTAG connect can't lose the race against a firmware that
+sleeps immediately after boot. Remove the ground before power-cycling to boot
+the new image.
