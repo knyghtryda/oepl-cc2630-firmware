@@ -224,7 +224,9 @@ bool oepl_radio_checkin(struct AvailDataInfo *out_info)
     // "Set NFC URL" content mode (it checks for capability bit 0x40).
     req->capabilities = oepl_nfc_present() ? CAPABILITY_HAS_NFC : 0;
     req->tagSoftwareVersion = TAG_FW_VERSION;
-    req->currentChannel = radio_st.current_channel;
+    // The AP expects the IEEE channel number (11..26), not our scan index --
+    // sending the index made the AP show "channel 1" for a tag on channel 15.
+    req->currentChannel = radio_st.current_ieee_ch;
     req->customMode = 0;
     add_crc(req, sizeof(struct AvailDataReq));
 
