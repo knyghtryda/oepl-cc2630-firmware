@@ -8,6 +8,19 @@ Verified 2026-09-21 on a stock TG-GR6000N, UniFlash 9.5.0.5651, XDS110
 firmware 3.0.0.41, Windows 11. Flashed the June ELF and the v0.32 `.bin`;
 both booted.
 
+## Prerequisites
+
+- **TI UniFlash** (free, no account needed): <https://www.ti.com/tool/UNIFLASH>.
+  Take the desktop installer for your OS and accept the default install
+  location (`C:\ti\uniflash_x.y.z` on Windows, `~/ti/uniflash_x.y.z` on
+  Linux/macOS) — the scripts look there. Anywhere else, set `UNIFLASH_DIR` to
+  the install directory. Verified with 9.5.0; any recent version should work.
+- A TI LaunchPad (or a standalone XDS110 probe). On first use, UniFlash may
+  offer to update the XDS110's firmware — accept.
+- On Windows the XDS110 USB drivers are installed by UniFlash. On Linux, run
+  the `install_drivers.sh` udev-rules script that ships inside the UniFlash
+  install directory so the probe is accessible without root.
+
 ## TL;DR
 
 ```bash

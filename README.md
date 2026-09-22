@@ -135,7 +135,8 @@ The D/L pin (DIO11) is controlled by Raspberry Pi GPIO17.
 ### Via TI XDS110 (LaunchPad) with UniFlash
 
 Any TI LaunchPad's on-board XDS110 works as a cJTAG programmer, no J-Link needed.
-Wiring, the UniFlash target config and troubleshooting are in
+Requires [TI UniFlash](https://www.ti.com/tool/UNIFLASH) (free) installed in its
+default location. Wiring, the UniFlash target config and troubleshooting are in
 [docs/FLASHING_XDS110.md](docs/FLASHING_XDS110.md).
 
 ```bash
