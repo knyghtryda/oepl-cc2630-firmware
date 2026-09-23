@@ -69,6 +69,7 @@ oepl-cc2630-firmware/
     ├── ap_log.py         Stream the AP's live log (block requests, xfer complete, timeouts)
     ├── weather_display.py  Home Assistant weather layout: preview, push, install automation
     ├── flash.sh          UART bootloader flash script
+    ├── xflash.sh/.ps1    XDS110 (UniFlash) flash script, uses cc2630_xds110.ccxml
     ├── dl_pin.sh         D/L pin (GPIO17) control
     └── start_fw.jlink    JLink firmware launch script
 ```
@@ -129,6 +130,17 @@ The D/L pin (DIO11) is controlled by Raspberry Pi GPIO17.
 
 ```bash
 ./tools/flash.sh binaries/Tag_FW_CC2630_TG-GR6000N.bin /dev/ttyUSB0
+```
+
+### Via TI XDS110 (LaunchPad) with UniFlash
+
+Any TI LaunchPad's on-board XDS110 works as a cJTAG programmer, no J-Link needed.
+Requires [TI UniFlash](https://www.ti.com/tool/UNIFLASH) (free) installed in its
+default location. Wiring, the UniFlash target config and troubleshooting are in
+[docs/FLASHING_XDS110.md](docs/FLASHING_XDS110.md).
+
+```bash
+./tools/xflash.sh binaries/Tag_FW_CC2630_TG-GR6000N.bin    # tools\xflash.ps1 on Windows
 ```
 
 ## Debugging
