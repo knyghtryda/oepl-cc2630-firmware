@@ -151,6 +151,7 @@ int8_t oepl_radio_scan_channels(void)
                             radio_st.current_channel = ch;
                             radio_st.current_ieee_ch = ieee_ch;
                             radio_st.last_rssi = rssi;
+                            radio_st.last_lqi = oepl_rf_last_lqi();
                             radio_st.ap_found = true;
 
                             oepl_rf_rx_stop();
@@ -312,6 +313,7 @@ for (uint8_t txtry = 0; txtry < CHECKIN_TX_TRIES; txtry++) {
                     // unicast to ap_mac.
                     memcpy(radio_st.ap_mac, ((struct MacFrameNormal *)pkt)->src, 8);
                     radio_st.last_rssi = rssi;
+                    radio_st.last_lqi = oepl_rf_last_lqi();
                     oepl_rf_rx_stop();
                     oepl_rf_rx_flush();
                     rtt_puts("Got AvailDataInfo type=");
