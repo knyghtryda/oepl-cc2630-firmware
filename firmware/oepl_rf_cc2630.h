@@ -41,6 +41,7 @@ void oepl_rf_rx_stop(void);
 // Returns pointer to frame data inside RX queue entry (valid until next rx_flush)
 // Returns NULL if no frame available
 uint8_t *oepl_rf_rx_get(uint8_t *out_len, int8_t *out_rssi);
+uint8_t oepl_rf_last_lqi(void);    // correlation (0-63) of that frame
 
 // Release the current RX entry so it can be reused
 void oepl_rf_rx_flush(void);

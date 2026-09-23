@@ -151,6 +151,7 @@ int8_t oepl_radio_scan_channels(void)
                             radio_st.current_channel = ch;
                             radio_st.current_ieee_ch = ieee_ch;
                             radio_st.last_rssi = rssi;
+                            radio_st.last_lqi = oepl_rf_last_lqi();
                             radio_st.ap_found = true;
 
                             oepl_rf_rx_stop();
@@ -224,7 +225,9 @@ bool oepl_radio_checkin(struct AvailDataInfo *out_info)
     // "Set NFC URL" content mode (it checks for capability bit 0x40).
     req->capabilities = oepl_nfc_present() ? CAPABILITY_HAS_NFC : 0;
     req->tagSoftwareVersion = TAG_FW_VERSION;
-    req->currentChannel = radio_st.current_channel;
+    // The AP expects the IEEE channel number (11..26), not our scan index --
+    // sending the index made the AP show "channel 1" for a tag on channel 15.
+    req->currentChannel = radio_st.current_ieee_ch;
     req->customMode = 0;
     add_crc(req, sizeof(struct AvailDataReq));
 
@@ -310,6 +313,7 @@ for (uint8_t txtry = 0; txtry < CHECKIN_TX_TRIES; txtry++) {
                     // unicast to ap_mac.
                     memcpy(radio_st.ap_mac, ((struct MacFrameNormal *)pkt)->src, 8);
                     radio_st.last_rssi = rssi;
+                    radio_st.last_lqi = oepl_rf_last_lqi();
                     oepl_rf_rx_stop();
                     oepl_rf_rx_flush();
                     rtt_puts("Got AvailDataInfo type=");

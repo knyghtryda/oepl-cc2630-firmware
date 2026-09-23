@@ -108,6 +108,12 @@ static rfc_dataEntryGeneral_t *rx_entries[RX_NUM_ENTRIES];
 static uint8_t rx_rd;
 static dataQueue_t rx_queue;
 
+// Correlation value (0-63) of the frame the last oepl_rf_rx_get() returned --
+// the chip's LQI equivalent. Read it right after accepting a frame, the same
+// way the RSSI that came out of oepl_rf_rx_get() is used.
+#define RX_STATUS_CORR_MASK  0x3F
+static uint8_t rx_last_lqi;
+
 // Reset every ring entry to PENDING and point both the radio and the read
 // cursor at entry 0.
 static void rx_queue_reset(void)
@@ -529,7 +535,7 @@ rf_status_t oepl_rf_rx_start(uint8_t ieee_channel, uint32_t timeout_us)
     rf_cmd_rx.rxConfig.bIncludePhyHdr = 0;
     rf_cmd_rx.rxConfig.bIncludeCrc = 0;
     rf_cmd_rx.rxConfig.bAppendRssi = 1;
-    rf_cmd_rx.rxConfig.bAppendCorrCrc = 0;
+    rf_cmd_rx.rxConfig.bAppendCorrCrc = 1;   // correlation byte = LQI
     rf_cmd_rx.rxConfig.bAppendSrcInd = 0;
     rf_cmd_rx.rxConfig.bAppendTimestamp = 0;
     rf_cmd_rx.pRxQ = &rx_queue;
@@ -641,7 +647,9 @@ uint8_t *oepl_rf_rx_get(uint8_t *out_len, int8_t *out_rssi)
     uint8_t *data = &e->data;
     uint8_t pkt_len = data[0];
 
-    if (pkt_len < 2 || pkt_len > (RX_BUF_SIZE - 20)) {
+    // The length byte counts the payload plus the two appended status bytes
+    // (RSSI then correlation/CRC), so a real frame is at least 3.
+    if (pkt_len < 3 || pkt_len > (RX_BUF_SIZE - 20)) {
         // Malformed frame. Callers don't flush on NULL, so release the
         // entry here or it stays FINISHED and stalls the ring.
         *out_len = 0;
@@ -649,8 +657,11 @@ uint8_t *oepl_rf_rx_get(uint8_t *out_len, int8_t *out_rssi)
         return NULL;
     }
 
-    *out_rssi = (int8_t)data[pkt_len];
-    *out_len = pkt_len - 1;
+    *out_rssi = (int8_t)data[pkt_len - 1];
+    // LQI is the correlation value in the low 6 bits of the status byte; the
+    // top two are the frame-filter and CRC-error flags.
+    rx_last_lqi = data[pkt_len] & RX_STATUS_CORR_MASK;
+    *out_len = pkt_len - 2;
 
     return &data[1];
 }
@@ -659,6 +670,12 @@ uint8_t *oepl_rf_rx_get(uint8_t *out_len, int8_t *out_rssi)
 void oepl_rf_rx_flush_all(void)
 {
     rx_queue_reset();
+}
+
+// LQI (correlation, 0-63) of the frame the last oepl_rf_rx_get() returned.
+uint8_t oepl_rf_last_lqi(void)
+{
+    return rx_last_lqi;
 }
 
 // Release the entry returned by the last oepl_rf_rx_get() and advance to the
