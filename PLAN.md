@@ -199,6 +199,22 @@ Most findings were already fixed and measured in v0.19/v0.20; PRs are superseded
 
 ## Follow-ups (not blocking)
 
+- [x] **Report the IEEE channel, not the scan index** (2026-09-23, v0.33, #11 by
+      @knyghtryda). `currentChannel` in AvailDataReq carried `radio_st.current_channel`
+      (the 0-5 index into the scan list) where the AP expects the IEEE number. The AP's
+      `processDataReq` drops a check-in from an unknown MAC when `currentChannel > 0` and
+      it disagrees with the AP's channel, so a new tag never registered on any AP not on
+      channel 11. Invisible here twice over: our AP is on channel 11 (index 0, so the
+      check is skipped) and all our tags were already in the AP's database (exempt).
+      A test setup can be blind to a bug in exactly the way it is configured.
+- [x] **M24: `lastPacketLQI` is populated** (2026-09-23, v0.33, same PR). The RX command
+      now sets `bAppendCorrCrc`, so the correlation byte arrives with each frame and
+      `radio_st.last_lqi` is written after scan and check-in. Note this shifts the
+      appended status bytes and changes how every frame is parsed — the minimum-length
+      guard moved from 2 to 3 to match. Bench: ch=11, lqi=55-61 against v0.32 controls
+      still reporting 0/0; check-in, 42-part block download, decode and refresh all pass.
+
+
 - [x] **The top-left antenna is a 2.4 GHz RF wake-up receiver** (settled 2026-09-21).
       The board has *three* antennas: the ~20.1 mm trace below the processor (Zigbee TX),
       the multi-turn coil on the back (NFC), and a ~17.3 mm trace top-left feeding an 8-pad

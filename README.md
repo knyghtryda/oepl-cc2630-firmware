@@ -34,7 +34,7 @@ Custom open-source OEPL firmware for the Solum TG-GR6000N 6.0" BWR e-paper tag.
 - [x] SEGGER RTT debug output (512-byte buffer)
 - [x] UART TX debug mirror on DIO3 at 115200 baud (off by default)
 
-**Firmware**: v0.32 — 27 KB flash, 20 KB RAM including the stack (see `PLAN.md`
+**Firmware**: v0.33 — 27 KB flash, 20 KB RAM including the stack (see `PLAN.md`
 for history, `DEVELOPMENT.md` for the test loop)
 
 **Battery**: ≈0.83 mAh/day for the reference weather tag — **check-in every
@@ -191,6 +191,13 @@ the FTDI adapter used for cc2538-bsl flashing.
   in flash sectors 16–20 before decoding; anything bigger is refused and
   retried. The weather layout is ~6 KB and a test card ~2.2 KB, so there is
   room, but a heavily dithered photograph could exceed it.
+- **Upgrade from v0.32 or earlier if your AP is not on channel 11.** Until
+  v0.33 the tag reported its *scan index* (0-5) as `currentChannel` instead of
+  the IEEE channel number. The AP drops a check-in from a MAC it does not
+  already know when `currentChannel > 0` and it disagrees with the AP's own
+  channel, so a **brand-new tag never registered** on any AP not on channel 11.
+  Tags already in the AP's database were exempt, which hid it, and index 0 —
+  channel 11 — skips the check entirely. Found and fixed by @knyghtryda (#11).
 - **OEPL channel 27 is unusable on this chip** — `CMD_IEEE_RX` takes 11–26
   only, and channel 27 wedged the radio core until the tag reset (fixed in
   v0.22 by skipping it; the AP must not be set to channel 27).
